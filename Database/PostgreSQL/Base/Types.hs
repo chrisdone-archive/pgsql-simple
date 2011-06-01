@@ -1,9 +1,11 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 module Database.PostgreSQL.Base.Types
-  (ConnectInfo
-  ,Connection
-  ,Field
-  ,Result)
+  (ConnectInfo(..)
+  ,Connection(..)
+  ,Field(..)
+  ,Result(..)
+  ,Type(..)
+  ,MessageType(..))
   where
 
 import Control.Concurrent.MVar (MVar)
@@ -18,6 +20,7 @@ import Data.Word
 import Network (PortID)
 import System.IO (Handle)
 
+-- | Connection configuration.
 data ConnectInfo = ConnectInfo {
       connectHost :: String
     , connectPort :: Word16
@@ -32,15 +35,15 @@ data Connection = Connection {
     }
 
 -- | Result of a database query.
-data Result a =
+data Result =
   Result {
-    resultRows :: [a]
-   ,resultDesc :: Maybe RowDescription
+    resultDesc :: Maybe RowDescription
    ,resultError :: Maybe L.ByteString
    ,resultNotices :: [String]
    ,resultType :: MessageType
   } deriving Show
 
+-- | An internal message type.
 data MessageType =
     CommandComplete
   | RowDescription
@@ -49,11 +52,12 @@ data MessageType =
   | ErrorResponse
   | ReadyForQuery
   | NoticeResponse
-  | UnknownMessageType
   | AuthenticationOk
   | Query
+  | UnknownMessageType
     deriving (Show,Eq)
 
+-- | Description of a postgres row.
 type RowDescription = [(L.ByteString
                        ,Int32
                        ,Int16
@@ -61,4 +65,39 @@ type RowDescription = [(L.ByteString
                        ,Int16
                        ,Int32)]
 
-data Field = Field
+-- | FIXME: Come up with something for this based on postgres's features.
+data Field = Field {
+    fieldType :: Type
+   ,fieldCharSet :: Word -- FIXME: Get the right value for this.
+  }
+
+-- FIXME: Update to proper supported types.
+-- | Column types supported by PostgreSQL.
+data Type = Decimal
+          | Tiny
+          | Short
+          | Long
+          | Float
+          | Double
+          | Null
+          | Timestamp
+          | LongLong
+          | Int24
+          | Date
+          | Time
+          | DateTime
+          | Year
+          | NewDate
+          | VarChar
+          | Bit
+          | NewDecimal
+          | Enum
+          | Set
+          | TinyBlob
+          | MediumBlob
+          | LongBlob
+          | Blob
+          | VarString
+          | String
+          | Geometry
+            deriving (Enum, Eq, Show, Typeable)
