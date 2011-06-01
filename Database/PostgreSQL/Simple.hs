@@ -45,7 +45,7 @@ module Database.PostgreSQL.Simple
 
     -- * Types
     -- FIXME:
-      -- Base.ConnectInfo(..)
+      Base.ConnectInfo(..)
     -- , Connection
     -- , Query
     -- , In(..)
@@ -105,8 +105,7 @@ import Database.PostgreSQL.Simple.QueryParams (QueryParams(..))
 import Database.PostgreSQL.Simple.Types (Binary(..), In(..), Only(..), Query(..))
 import Text.Regex.PCRE.Light (compile, caseless, match)
 import qualified Data.ByteString.Char8 as B
--- FIXME:
--- import qualified Database.MySQL.Base as Base
+import qualified Database.PostgreSQL.Base as Base
 
 -- | Exception thrown if a 'Query' could not be formatted correctly.
 -- This may occur if the number of \'@?@\' characters in the query
