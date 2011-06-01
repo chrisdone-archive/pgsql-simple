@@ -1,0 +1,90 @@
+
+./dist/build/autogen/Paths_pgsql_simple.hs,652
+module Paths_pgsql_simple (0,1
+version ::9,10
+version =10,11
+bindir, libdir, datadir, libexecdir :: FilePath12,13
+bindir, libdir, datadir, libexecdir :: FilePath12,13
+bindir, libdir, datadir, libexecdir12,13
+bindir, libdir,12,13
+bindir     =14,15
+libdir     =15,16
+datadir    =16,17
+libexecdir =17,18
+getBinDir, getLibDir, getDataDir, getLibexecDir :: IO FilePath19,20
+getBinDir, getLibDir, getDataDir, getLibexecDir :: IO19,20
+getBinDir, getLibDir, getDataDir, getLibexecDir19,20
+getBinDir, getLibDir,19,20
+getBinDir =20,21
+getLibDir =21,22
+getDataDir =22,23
+getLibexecDir =23,24
+getDataFileName ::25,26
+getDataFileName name26,27
+
+./Database/PostgreSQL/Simple/Types.hs,365
+module Database.PostgreSQL.Simple.Types12,13
+data Null =31,32
+data Null = Null31,32
+instance Eq34,35
+newtype Query =57,58
+newtype Query = Query {57,58
+      fromQuery ::58,59
+newtype Only a88,89
+newtype Only a = Only {88,89
+      fromOnly ::89,90
+newtype In a99,100
+newtype In a = In a99,100
+newtype Binary a103,104
+newtype Binary a = Binary a103,104
+
+./Database/PostgreSQL/Simple/QueryParams.hs,131
+module Database.PostgreSQL.Simple.QueryParams14,15
+class QueryParams a27,28
+    renderParams ::28,29
+instance QueryParams31,32
+
+./Database/PostgreSQL/Simple/Result.hs,714
+module Database.PostgreSQL.Simple.Result20,21
+data ResultError =53,54
+data ResultError = Incompatible {53,54
+data ResultError = Incompatible { errSQLType ::53,54
+                                , errHaskellType ::54,55
+                                , errMessage ::55,56
+                 | UnexpectedNull {57,58
+                 | UnexpectedNull { errSQLType ::57,58
+                                  , errHaskellType ::58,59
+                                  , errMessage ::59,60
+                 | ConversionFailed {62,63
+                 | ConversionFailed { errSQLType ::62,63
+                                    , errHaskellType ::63,64
+                                    , errMessage ::64,65
+
+./Database/PostgreSQL/Simple/QueryResults.hs,53
+module Database.PostgreSQL.Simple.QueryResults16,17
+
+./Database/PostgreSQL/Simple/Param.hs,280
+module Database.PostgreSQL.Simple.Param13,14
+data Action =46,47
+    Plain Builder47,48
+  | Escape ByteString52,53
+  | Many [Action]56,57
+instance Show60,61
+class Param a66,67
+    render ::67,68
+renderNull ::96,97
+renderNull =97,98
+inQuotes ::196,197
+inQuotes b197,198
+
+./Database/PostgreSQL/Simple.hs,306
+module Database.PostgreSQL.Simple13,14
+data FormatError =113,114
+data FormatError = FormatError {113,114
+      fmtMessage ::114,115
+    , fmtQuery ::115,116
+    , fmtParams ::116,117
+data QueryError =123,124
+data QueryError = QueryError {123,124
+      qeMessage ::124,125
+    , qeQuery ::125,126
