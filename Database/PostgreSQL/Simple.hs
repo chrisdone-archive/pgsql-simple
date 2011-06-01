@@ -45,8 +45,8 @@ module Database.PostgreSQL.Simple
 
     -- * Types
     -- FIXME:
-      Base.ConnectInfo(..)
-    -- , Connection
+      ConnectInfo(..)
+    , Connection
     -- , Query
     -- , In(..)
     -- , Binary(..)
@@ -93,9 +93,7 @@ import Data.Int (Int64)
 import Data.List (intersperse)
 import Data.Monoid (mappend, mconcat)
 import Data.Typeable (Typeable)
--- FIXME:
--- import Database.PostgreSQL.Base (Connection, Result)
--- import Database.PostgreSQL.Base.Types (Field)
+import Database.PostgreSQL.Base.Types (ConnectInfo,Connection,Result,Field)
 import Database.PostgreSQL.Simple.Param (Action(..), inQuotes)
 import Database.PostgreSQL.Simple.QueryParams (QueryParams(..))
 -- FIXME:
