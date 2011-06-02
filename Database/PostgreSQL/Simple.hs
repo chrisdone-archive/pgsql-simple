@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns, DeriveDataTypeable, OverloadedStrings #-}
+{-# LANGUAGE BangPatterns, DeriveDataTypeable, OverloadedStrings, DisambiguateRecordFields #-}
 
 -- |
 -- Module:      Database.PostgreSQL.Simple
@@ -60,12 +60,12 @@ module Database.PostgreSQL.Simple
     , Base.close
     -- * Queries that return results
     , query
-    , query_
+    -- , query_
     -- * Queries that stream results
-    , fold
-    , fold_
-    , forEach
-    , forEach_
+    -- , fold
+    -- , fold_
+    -- , forEach
+    -- , forEach_
     -- * Statements that do not return results
     , execute
     , execute_
@@ -86,12 +86,13 @@ import Blaze.ByteString.Builder.Char8 (fromChar)
 import Control.Applicative ((<$>), pure)
 import Control.Exception (Exception, bracket, onException, throw, throwIO)
 import Control.Monad.Fix (fix)
+import Control.Monad (forM,forM_)
 import Data.ByteString (ByteString)
 import Data.Int (Int64)
 import Data.List (intersperse)
 import Data.Monoid (mappend, mconcat)
 import Data.Typeable (Typeable)
-import Database.PostgreSQL.Base.Types (ConnectInfo,Connection,Result,Field)
+import Database.PostgreSQL.Base.Types (ConnectInfo(..),Connection(..),Result,Field)
 import Database.PostgreSQL.Simple.Param (Action(..), inQuotes)
 import Database.PostgreSQL.Simple.QueryParams (QueryParams(..))
 import Database.PostgreSQL.Simple.QueryResults (QueryResults(..))
@@ -100,7 +101,20 @@ import Database.PostgreSQL.Simple.Types (Binary(..), In(..), Only(..), Query(..)
 import Text.Regex.PCRE.Light (compile, caseless, match)
 import qualified Data.ByteString.Char8 as B
 import qualified Database.PostgreSQL.Base as Base
+import qualified Data.Text as Text
 
+test :: IO Connection
+test = do
+  conn <- Base.connect Base.defaultConnectInfo {
+      connectUser="amelie"
+    , connectDatabase="amelie"
+    , connectPassword= "amelie"
+    }
+  return conn
+  -- xs <- query_ conn "select name,age from users"
+  -- forM_ xs $ \(name,age) ->
+  --   putStrLn $ Text.unpack name ++ " is " ++ show (age :: Int)
+   
 -- | Exception thrown if a 'Query' could not be formatted correctly.
 -- This may occur if the number of \'@?@\' characters in the query
 -- string does not match the number of parameters provided.
@@ -159,7 +173,7 @@ formatMany conn q@(Query template) qs = do
       return . toByteString . mconcat $ fromByteString before :
                                         intersperse (fromChar ',') bs ++
                                         [fromByteString after]
-    _ -> error "foo"
+    _ -> error "foo" -- FIXME:
   where
    re = compile "^([^?]+\\bvalues\\s*)\
                  \(\\(\\s*[?](?:\\s*,\\s*[?])*\\s*\\))\
@@ -169,7 +183,7 @@ formatMany conn q@(Query template) qs = do
 buildQuery :: Connection -> Query -> ByteString -> [Action] -> IO Builder
 buildQuery conn q template xs = zipParams (split template) <$> mapM sub xs
   where sub (Plain b)  = pure b
-        sub (Escape s) = pure $ (inQuotes . fromByteString . xxx) s
+        sub (Escape s) = pure $ (inQuotes . fromByteString . escape) s
         sub (Many ys)  = mconcat <$> mapM sub ys
         split s = fromByteString h : if B.null t then [] else split (B.tail t)
             where (h,t) = B.break (=='?') s
@@ -179,7 +193,8 @@ buildQuery conn q template xs = zipParams (split template) <$> mapM sub xs
                                   " '?' characters, but " ++
                                   show (length xs) ++ " parameters") q xs
 -- FIXME:
-xxx = undefined
+escape :: ByteString -> ByteString
+escape = id
 
 -- | Execute an @INSERT@, @UPDATE@, or other SQL query that is not
 -- expected to return results.
@@ -237,106 +252,17 @@ finishExecute conn q = do
 query :: (QueryParams q, QueryResults r)
          => Connection -> Query -> q -> IO [r]
 query conn template qs = do
-  Base.query conn =<< formatQuery conn template qs
-  finishQuery conn template
+  q <- formatQuery conn template qs
+  (fields,rows) <- Base.query conn q
+  forM rows $ \row -> let !c = convertResults fields row
+                      in return c
 
 -- | A version of 'query' that does not perform query substitution.
 query_ :: (QueryResults r) => Connection -> Query -> IO [r]
-query_ conn q@(Query que) = do
-  Base.query conn que
-  finishQuery conn q
-
--- | Perform a @SELECT@ or other SQL query that is expected to return
--- results. Results are streamed incrementally from the server, and
--- consumed via a left fold.
---
--- The result consumer must be carefully written to execute
--- quickly. If the consumer is slow, server resources will be tied up,
--- and other clients may not be able to update the tables from which
--- the results are being streamed.
---
--- When dealing with small results, it may be simpler (and perhaps
--- faster) to use 'query' instead.
---
--- This fold is /not/ strict. The stream consumer is responsible for
--- forcing the evaluation of its result to avoid space leaks.
---
--- Exceptions that may be thrown:
---
--- * 'FormatError': the query string could not be formatted correctly.
---
--- * 'QueryError': the result contains no columns (i.e. you should be
---   using 'execute' instead of 'query').
---
--- * 'ResultError': result conversion failed.
-fold :: (QueryParams q, QueryResults r) =>
-        Connection
-     -> Query                   -- ^ Query template.
-     -> q                       -- ^ Query parameters.
-     -> a                       -- ^ Initial state for result consumer.
-     -> (a -> r -> IO a)        -- ^ Result consumer.
-     -> IO a
-fold conn template qs z f = do
-  Base.query conn =<< formatQuery conn template qs
-  finishFold conn template z f
-
--- | A version of 'fold' that does not perform query substitution.
-fold_ :: (QueryResults r) =>
-         Connection
-      -> Query                  -- ^ Query.
-      -> a                      -- ^ Initial state for result consumer.
-      -> (a -> r -> IO a)       -- ^ Result consumer.
-      -> IO a
-fold_ conn q@(Query que) z f = do
-  Base.query conn que
-  finishFold conn q z f
-
--- | A version of 'fold' that does not transform a state value.
-forEach :: (QueryParams q, QueryResults r) =>
-           Connection
-        -> Query                -- ^ Query template.
-        -> q                    -- ^ Query parameters.
-        -> (r -> IO ())         -- ^ Result consumer.
-        -> IO ()
-forEach conn template qs = fold conn template qs () . const
-{-# INLINE forEach #-}
-
--- | A version of 'forEach' that does not perform query substitution.
-forEach_ :: (QueryResults r) =>
-            Connection
-         -> Query                -- ^ Query template.
-         -> (r -> IO ())         -- ^ Result consumer.
-         -> IO ()
-forEach_ conn template = fold_ conn template () . const
-{-# INLINE forEach_ #-}
-
---FIXME:
-finishQuery :: (QueryResults r) => Connection -> Query -> IO [r]
-finishQuery conn q = return [] -- withResult (Base.storeResult conn) q $ \r fs ->
-  -- flip fix [] $ \loop acc -> do
-  --   row <- Base.fetchRow r
-  --   case row of
-  --     [] -> return (reverse acc)
-  --     _  -> let !c = convertResults fs row
-  --           in loop (c:acc)
-
---FIXME:
-finishFold :: (QueryResults r) =>
-                Connection -> Query -> a -> (a -> r -> IO a) -> IO a
-finishFold conn q z0 f = undefined -- withResult (Base.useResult conn) q $ \r fs ->
-  -- flip fix z0 $ \loop z -> do
-  --   row <- Base.fetchRow r
-  --   case row of
-  --     [] -> return z
-  --     _  -> (f z $! convertResults fs row) >>= loop
-
---FIXME:
-withResult :: (IO Result) -> Query -> (Result -> [Field] -> IO a) -> IO a
-withResult fetchResult q act = return undefined -- bracket fetchResult Base.freeResult $ \r -> do
-  -- ncols <- Base.fieldCount (Right r)
-  -- if ncols == 0
-  --   then throwIO $ QueryError "query resulted in zero-column result" q
-  --   else act r =<< Base.fetchFields r
+query_ conn (Query q) = do
+  (fields,rows) <- Base.query conn q
+  forM rows $ \row -> let !c = convertResults fields row
+                      in return c
 
 -- | Execute an action inside a SQL transaction.
 --

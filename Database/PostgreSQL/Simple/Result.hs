@@ -23,9 +23,10 @@ module Database.PostgreSQL.Simple.Result
     , ResultError(..)
     ) where
 
--- #include "MachDeps.h" -- FIXME: What's this for?
+-- FIXME: What's this for?
+#include "MachDeps.h"
 
-import Control.Applicative ((<$>), (<*>), (<*), pure)
+import Control.Applicative ((<$>), (<*>), (<*), (<|>), pure)
 import Control.Exception (Exception, throw)
 import Data.Attoparsec.Char8 hiding (Result)
 import Data.Bits ((.&.), (.|.), shiftL)
@@ -36,10 +37,10 @@ import Data.Ratio (Ratio)
 import Data.Time.Calendar (Day, fromGregorian)
 import Data.Time.Clock (UTCTime)
 import Data.Time.Format (parseTime)
-import Data.Time.LocalTime (TimeOfDay, makeTimeOfDayValid)
+import Data.Time.LocalTime (TimeOfDay,LocalTime,ZonedTime,makeTimeOfDayValid)
 import Data.Typeable (TypeRep, Typeable, typeOf)
 import Data.Word (Word, Word8, Word16, Word32, Word64)
-import Database.PostgreSQL.Base.Types (Field(..), Type(..))
+import Database.PostgreSQL.Base.Types (Field(..),Type(..),FormatCode(..))
 import System.Locale (defaultTimeLocale)
 import qualified Data.ByteString as SB
 import qualified Data.ByteString.Char8 as B8
@@ -82,10 +83,11 @@ instance (Result a) => Result (Maybe a) where
     convert f bs      = Just (convert f bs)
 
 instance Result Bool where
-    convert = atto ok8 ((/=(0::Int)) <$> decimal)
-
-instance Result Int8 where
-    convert = atto ok8 $ signed decimal
+    convert f (Just t)
+      | str == "t" = True
+      | str == "f" = False
+     where str = B8.unpack t
+    convert f _ = conversionFailed f "Bool" "could not parse"
 
 instance Result Int16 where
     convert = atto ok16 $ signed decimal
@@ -102,9 +104,6 @@ instance Result Int64 where
 instance Result Integer where
     convert = atto ok64 $ signed decimal
 
-instance Result Word8 where
-    convert = atto ok8 decimal
-
 instance Result Word16 where
     convert = atto ok16 decimal
 
@@ -119,17 +118,15 @@ instance Result Word64 where
 
 instance Result Float where
     convert = atto ok ((fromRational . toRational) <$> double)
-        where ok = mkCompats [Float,Double,Decimal,NewDecimal,Tiny,Short,Int24]
+        where ok = mkCompats [Real,Short,Long]
 
 instance Result Double where
     convert = atto ok double
-        where ok = mkCompats [Float,Double,Decimal,NewDecimal,Tiny,Short,Int24,
-                              Long]
+        where ok = mkCompats [Real,DoublePrecision,Short,Long]
 
 instance Result (Ratio Integer) where
     convert = atto ok rational
-        where ok = mkCompats [Float,Double,Decimal,NewDecimal,Tiny,Short,Int24,
-                              Long,LongLong]
+        where ok = mkCompats [Decimal,Numeric,Real,DoublePrecision]
 
 instance Result SB.ByteString where
     convert f = doConvert f okText $ id
@@ -148,19 +145,39 @@ instance Result LT.Text where
 instance Result [Char] where
     convert f = ST.unpack . convert f
 
-instance Result UTCTime where
+instance Result LocalTime where
     convert f = doConvert f ok $ \bs ->
-                case parseTime defaultTimeLocale "%F %T" (B8.unpack bs) of
+                case parseLocalTime (B8.unpack bs) of
                   Just t -> t
                   Nothing -> conversionFailed f "UTCTime" "could not parse"
-        where ok = mkCompats [DateTime,Timestamp]
+        where ok = mkCompats [TimestampWithZone]
+
+parseLocalTime :: String -> Maybe LocalTime
+parseLocalTime s =
+  parseTime defaultTimeLocale "%F %T%Q" s <|>
+  parseTime defaultTimeLocale "%F %T%Q%z" (s ++ "00")
+
+instance Result ZonedTime where
+    convert f = doConvert f ok $ \bs ->
+                case parseZonedTime (B8.unpack bs) of
+                  Just t -> t
+                  Nothing -> conversionFailed f "UTCTime" "could not parse"
+        where ok = mkCompats [TimestampWithZone]
+
+parseZonedTime :: String -> Maybe ZonedTime
+parseZonedTime s =
+  parseTime defaultTimeLocale "%F %T%Q%z" (s ++ "00")
+
+instance Result UTCTime where
+    convert f = doConvert f ok $ \bs ->
+                case parseTime defaultTimeLocale "%F %T%Q" (B8.unpack bs) of
+                  Just t -> t
+                  Nothing -> conversionFailed f "UTCTime" "could not parse"
+        where ok = mkCompats [Timestamp]
 
 instance Result Day where
-    convert f = flip (atto ok) f $ case fieldType f of
-                                     Year -> year
-                                     _    -> date
-        where ok = mkCompats [Year,Date,NewDate]
-              year = fromGregorian <$> decimal <*> pure 1 <*> pure 1
+    convert f = flip (atto ok) f $ date
+        where ok = mkCompats [Date]
               date = fromGregorian <$> (decimal <* char '-')
                                    <*> (decimal <* char '-')
                                    <*> decimal
@@ -176,10 +193,10 @@ instance Result TimeOfDay where
         where ok = mkCompats [Time]
 
 isText :: Field -> Bool
-isText f = fieldCharSet f /= 63
+isText f = fieldFormatCode f == TextCode
 
 newtype Compat = Compat Word32
-    
+
 mkCompats :: [Type] -> Compat
 mkCompats = foldl' f (Compat 0) . map mkCompat
   where f (Compat a) (Compat b) = Compat (a .|. b)
@@ -190,13 +207,11 @@ mkCompat = Compat . shiftL 1 . fromEnum
 compat :: Compat -> Compat -> Bool
 compat (Compat a) (Compat b) = a .&. b /= 0
 
-okText, ok8, ok16, ok32, ok64, okWord :: Compat
-okText = mkCompats [VarChar,TinyBlob,MediumBlob,LongBlob,Blob,VarString,String,
-                    Set,Enum]
-ok8 = mkCompats [Tiny]
-ok16 = mkCompats [Tiny,Short]
-ok32 = mkCompats [Tiny,Short,Int24,Long]
-ok64 = mkCompats [Tiny,Short,Int24,Long,LongLong]
+okText, ok16, ok32, ok64, okWord :: Compat
+okText = mkCompats [CharVarying,Characters,Text]
+ok16 = mkCompats [Short]
+ok32 = mkCompats [Short,Long]
+ok64 = mkCompats [Short,Long,LongLong]
 #if WORD_SIZE_IN_BITS < 64
 okWord = ok32
 #else

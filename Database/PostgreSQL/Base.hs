@@ -1,5 +1,6 @@
 {-# OPTIONS_GHC -Wall -fno-warn-name-shadowing #-}
-{-# LANGUAGE RecordWildCards, OverloadedStrings, ScopedTypeVariables, FlexibleContexts #-}
+{-# LANGUAGE RecordWildCards, OverloadedStrings, ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts, ViewPatterns, NamedFieldPuns, TupleSections #-}
 
 -- | A front-end implementation for the PostgreSQL database protocol
 --   version 3.0 (implemented in PostgreSQL 7.4 and later).
@@ -22,12 +23,14 @@ import           Data.Binary.Put
 import qualified Data.ByteString           as B
 import           Data.ByteString           (ByteString)
 import qualified Data.ByteString.Lazy      as L
--- import qualified Data.ByteString.Lazy.UTF8 as UTF8
--- import           Data.ByteString.UTF8      (toString)
+import qualified Data.ByteString.Lazy.UTF8 as UTF8
+import           Data.ByteString.UTF8      (toString,fromString)
 import           Data.Int
 import           Data.List
 import           Data.Maybe
 import           Data.Monoid
+import qualified Data.Map as M
+import           Data.Map (Map)
 import           Network
 import           Prelude
 import           System.IO                 hiding (hPutStr)
@@ -60,7 +63,7 @@ autocommit conn onOff = return () -- withConnection conn $ \ptr ->
 --
 -- * Server on @localhost@
 --
--- * User @root@
+-- * User @postgres@
 --
 -- * No password
 --
@@ -73,11 +76,11 @@ autocommit conn onOff = return () -- withConnection conn $ \ptr ->
 -- > connect defaultConnectInfo { connectHost = "db.example.com" }
 defaultConnectInfo :: ConnectInfo
 defaultConnectInfo = ConnectInfo {
-                       connectHost = "localhost"
+                       connectHost = "127.0.0.1"
                      , connectPort = 5432
-                     , connectUser = "root"
+                     , connectUser = "postgres"
                      , connectPassword = ""
-                     , connectDatabase = "test"
+                     , connectDatabase = ""
                      }
 
 -- | Connect with the given username to the given database. Will throw
@@ -88,7 +91,8 @@ connect connectInfo@ConnectInfo{..} = liftIO $ withSocketsDo $ do
   h <- connectTo connectHost (PortNumber $ fromIntegral connectPort)
   hSetBuffering h NoBuffering
   putMVar var $ Just h
-  let conn = Connection var
+  types <- newMVar M.empty
+  let conn = Connection var types
   authenticate conn connectInfo
   return conn
 
@@ -108,23 +112,29 @@ commit conn = do
 -- | Close a connection. Can safely be called any number of times.
 close :: MonadIO m => Connection -- ^ The connection.
       -> m ()
-close (Connection v) = liftIO$ do
-  modifyMVar_ v $ \h -> do
+close Connection{connectionHandle} = liftIO$ do
+  modifyMVar_ connectionHandle $ \h -> do
     case h of
       Just h -> hClose h
       Nothing -> return ()
     return Nothing
 
 -- | Run a simple query on a connection.
-query :: MonadIO m => Connection -- ^ The connection.
-      -> ByteString                  -- ^ The query.
-      -> m [a]
+query :: MonadIO m
+      => Connection -- ^ The connection.
+      -> ByteString              -- ^ The query.
+      -> m ([Field],[[Maybe ByteString]])
 query conn sql = liftIO $ do
   withConnection conn $ \h -> do
-    Result{..} <- sendQuery h sql
+    types <- readMVar $ connectionObjects conn
+    Result{..} <- sendQuery types h sql
     case resultType of
-      ErrorResponse -> error "TODO: query.ErrorResponse"
-      _             -> return $ [] -- resultRows -- FIXME:
+      ErrorResponse -> error "TODO: query.ErrorResponse error"
+      EmptyQueryResponse -> error "TODO: query.EmptyQueryResponse error"
+      _             ->
+        case resultDesc of
+          Just fields -> return (fields,resultRows)
+          Nothing     -> error "TODO: query.Fields error"
 
 -- | PostgreSQL protocol version supported by this library.    
 protocolVersion :: Int32
@@ -135,11 +145,12 @@ protocolVersion = 196608
 
 -- | Run the connectInfoentication procedure.
 authenticate :: Connection -> ConnectInfo -> IO ()
-authenticate conn connectInfo = do
+authenticate conn@Connection{..} connectInfo = do
   withConnection conn $ \h -> do
     sendStartUp h connectInfo
     getConnectInfoResponse h
-    return ()
+    objects <- objectIds h
+    modifyMVar_ connectionObjects (\_ -> return objects)
 
 -- | Send the start-up message.
 sendStartUp :: Handle -> ConnectInfo -> IO ()
@@ -160,56 +171,61 @@ getConnectInfoResponse h = do
     -- TODO: Handle connectInfo failure. Handle information messages that are
     --       sent, maybe store in the connection value for later
     --       inspection.
-    _ -> return ()
+    -- FIXME:
+    _ -> error "getConnectInfoResponse: authentication failed."
 
 --------------------------------------------------------------------------------
 -- Initialization
 
-typeObjectIds :: Connection -> IO [(String,Int32)]
-typeObjectIds conn = do
-  withConnection conn $ \h -> do
-    Result{..} <- sendQuery h (fromString ("SELECT typname, oid FROM pg_type" :: String))
+objectIds :: Handle -> IO (Map ObjectId String)
+objectIds h = do
+    Result{..} <- sendQuery M.empty h q
     case resultType of
-      ErrorResponse -> return [] -- TODO: Throw an error in some nice way.
-        -- FIXME:
-      -- _ -> return $ catMaybes $ flip map resultRows $ \row ->
-      --        case map toString $ catMaybes row of
-      --          [typ,objId] -> Just $ (typ,read objId)
-      --          _           -> Nothing
+      ErrorResponse -> error "objectIds: ErrorResponse"
+      _ -> return $ M.fromList $ catMaybes $ flip map resultRows $ \row ->
+             case map toString $ catMaybes row of
+               [typ,objId] -> Just $ (ObjectId (read objId),typ)
+               _           -> Nothing
+
+  where q = fromString ("SELECT typname, oid FROM pg_type" :: String)
 
 --------------------------------------------------------------------------------
 -- Queries and commands
 
 -- | Send a simple query.
-sendQuery :: Handle -> ByteString -> IO Result
-sendQuery h sql = do
+sendQuery :: Map ObjectId String -> Handle -> ByteString -> IO Result
+sendQuery types h sql = do
   sendMessage h Query $ string sql
   listener $ \continue -> do
     (typ,block) <- liftIO $ getMessage h
-    let done = modify $ \r -> r { resultType = typ }
+    liftIO $ putStrLn $ show (typ,block)
+    let setStatus = modify $ \r -> r { resultType = typ }
     case typ of
-      CommandComplete    -> done
-      EmptyQueryResponse -> done
-      ReadyForQuery      -> done
-      ErrorResponse      -> do
-        modify $ \r -> r { resultError = Just block }
-        done
+      ReadyForQuery -> return ()
 
-      listenFor -> do
-        case listenFor of
-          RowDescription -> getRowDesc block
+      listenPassively -> do
+        case listenPassively of
+          EmptyQueryResponse -> setStatus
+          CommandComplete    -> setStatus
+          ErrorResponse -> do
+            modify $ \r -> r { resultError = Just block }
+            setStatus
+          RowDescription -> getRowDesc types block
           DataRow        -> getDataRow block
           NoticeResponse -> getNotice block
           _ -> return ()
+
         continue
 
-  where emptyResponse = Result Nothing Nothing [] UnknownMessageType
+  where emptyResponse = Result [] Nothing Nothing [] UnknownMessageType
         listener m = execStateT (fix m) emptyResponse
 
 -- | Update the row description of the result.
-getRowDesc :: MonadState Result m => L.ByteString -> m ()
-getRowDesc block =
-  modify $ \r -> r { resultDesc = Just (runGet parseMsg block) }
+getRowDesc :: MonadState Result m => Map ObjectId String -> L.ByteString -> m ()
+getRowDesc types block =
+  modify $ \r -> r {
+    resultDesc = Just (parseFields types (runGet parseMsg block))
+  }
     where parseMsg = do
             fieldCount :: Int16 <- getInt16
             forM [1..fieldCount] $ \_ -> do
@@ -220,13 +236,99 @@ getRowDesc block =
               size <- getInt16
               modifier <- getInt32
               code <- getInt16
-              return (name,objid,colid,dtype,size,modifier)
+              return (name,objid,colid,dtype,size,modifier,code)
+
+-- | Parse a row description.
+--
+-- Parts of the row description are:
+--
+-- String: The field name.
+--
+-- Int32: If the field can be identified as a column of a specific
+-- table, the object ID of the table; otherwise zero.
+--
+-- Int16: If the field can be identified as a column of a specific
+-- table, the attribute number of the column; otherwise zero.
+----
+-- Int32: The object ID of the field's data type.
+----
+-- Int16: The data type size (see pg_type.typlen). Note that negative
+-- values denote variable-width types.
+----
+-- Int32: The type modifier (see pg_attribute.atttypmod). The meaning
+-- of the modifier is type-specific.
+--
+-- Int16: The format code being used for the field. Currently will be
+-- zero (text) or one (binary). In a RowDescription returned from the
+-- statement variant of Describe, the format code is not yet known and
+-- will always be zero.
+--
+parseFields :: Map ObjectId String
+            -> [(L.ByteString,Int32,Int16,Int32,Int16,Int32,Int16)]
+            -> [Field]
+parseFields types = map parse where
+  parse (fieldName
+        ,parseObjId        -> objectId
+        ,parseAttrId       -> attrId
+        ,parseType types   -> typ
+        ,parseSize         -> typeSize
+        ,parseModifier typ -> typeModifier
+        ,parseFormatCode   -> formatCode)
+    = Field {
+      fieldType = typ
+    , fieldFormatCode = TextCode
+    }
+
+-- | Parse an object ID. 0 means no object.
+parseObjId :: Int32 -> Maybe ObjectId
+parseObjId 0 = Nothing
+parseObjId n = Just (ObjectId n)
+
+-- | Parse an attribute ID. 0 means no object.
+parseAttrId :: Int16 -> Maybe ObjectId
+parseAttrId 0 = Nothing
+parseAttrId n = Just (ObjectId $ fromIntegral n)
+
+-- | Parse a number into a type.
+parseType :: Map ObjectId String -> Int32 -> Type
+parseType types objId =
+  case M.lookup (ObjectId objId) types of
+    Just name -> case typeFromName name of
+                   Just typ -> typ
+                   Nothing -> error $ "parseType: Unknown type: " ++ show name
+    typ       -> error $ "parseType: Unable to parse type: " ++ show objId
+
+typeFromName :: String -> Maybe Type
+typeFromName = flip lookup fieldTypes
+
+fieldTypes =
+  [("bool",Boolean)
+  ,("int2",Short)
+  ,("integer",Long)
+  ,("int",Long)
+  ,("int4",Long)
+  ,("int8",LongLong)
+  ,("timestamptz",TimestampWithZone)]
+
+-- | Parse a type's size.
+parseSize :: Int16 -> Size
+parseSize (-1) = Varying
+parseSize n    = Size n
+
+-- FIXME:
+-- | Parse a type-specific modifier.
+parseModifier :: Type -> Int32 -> Maybe Modifier
+parseModifier _typ _modifier = Nothing
+
+-- | Parse a format code (text or binary).
+parseFormatCode :: Int16 -> FormatCode
+parseFormatCode 1 = BinaryCode
+parseFormatCode _ = TextCode
 
 -- | Add a data row to the response.
 getDataRow :: MonadState Result m => L.ByteString -> m ()
 getDataRow block =
-  return ()
---  modify $ \r -> r { resultRows = runGet parseMsg block : resultRows r }
+  modify $ \r -> r { resultRows = runGet parseMsg block : resultRows r }
     where parseMsg = do
             values :: Int16 <- getInt16
             forM [1..values] $ \_ -> do
@@ -314,12 +416,8 @@ getMessage h = do
 -- Binary input/output
 
 -- | Put a Haskell string, encoding it to UTF-8, and null-terminating it.
---   TODO: Make this not terrible.
-string :: ByteString -> Put
-string s = do put s; zero
-fromString = const (undefined :: ByteString)
--- FIXME:
-toString = const ""
+string :: B.ByteString -> Put
+string s = do putByteString s; zero
 
 -- | Put a Haskell 32-bit integer.
 int32 :: Int32 -> Put
