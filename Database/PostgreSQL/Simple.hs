@@ -60,7 +60,7 @@ module Database.PostgreSQL.Simple
     , Base.close
     -- * Queries that return results
     , query
-    -- , query_
+    , query_
     -- * Queries that stream results
     -- , fold
     -- , fold_
@@ -103,18 +103,6 @@ import qualified Data.ByteString.Char8 as B
 import qualified Database.PostgreSQL.Base as Base
 import qualified Data.Text as Text
 
-test :: IO Connection
-test = do
-  conn <- Base.connect Base.defaultConnectInfo {
-      connectUser="amelie"
-    , connectDatabase="amelie"
-    , connectPassword= "amelie"
-    }
-  return conn
-  -- xs <- query_ conn "select name,age from users"
-  -- forM_ xs $ \(name,age) ->
-  --   putStrLn $ Text.unpack name ++ " is " ++ show (age :: Int)
-   
 -- | Exception thrown if a 'Query' could not be formatted correctly.
 -- This may occur if the number of \'@?@\' characters in the query
 -- string does not match the number of parameters provided.

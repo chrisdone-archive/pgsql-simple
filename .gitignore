@@ -1,5 +1,5 @@
-.hi
-.o
+*.hi
+*.o
 dist
 cabal-dev
 TAGS

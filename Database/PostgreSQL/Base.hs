@@ -198,7 +198,7 @@ sendQuery types h sql = do
   sendMessage h Query $ string sql
   listener $ \continue -> do
     (typ,block) <- liftIO $ getMessage h
-    liftIO $ putStrLn $ show (typ,block)
+--    liftIO $ putStrLn $ show (typ,block)
     let setStatus = modify $ \r -> r { resultType = typ }
     case typ of
       ReadyForQuery -> return ()
@@ -308,7 +308,9 @@ fieldTypes =
   ,("int",Long)
   ,("int4",Long)
   ,("int8",LongLong)
-  ,("timestamptz",TimestampWithZone)]
+  ,("timestamptz",TimestampWithZone)
+  ,("varchar",CharVarying)
+  ,("text",Text)]
 
 -- | Parse a type's size.
 parseSize :: Int16 -> Size
