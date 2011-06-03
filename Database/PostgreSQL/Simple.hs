@@ -68,12 +68,10 @@ module Database.PostgreSQL.Simple
     -- , forEach_
     -- * Statements that do not return results
     , execute
-    -- , execute_
-    -- , executeMany
---    , Base.insertID
+    , execute_
+    , executeMany
     -- * Transaction handling
---    , withTransaction
---    , Base.autocommit
+    , withTransaction
     , Base.commit
     , Base.rollback
     -- * Helper functions
@@ -190,7 +188,7 @@ execute conn template qs = do
 
 -- | A version of 'execute' that does not perform query substitution.
 execute_ :: Connection -> Query -> IO Integer
-execute_ conn q@(Query stmt) = do
+execute_ conn (Query stmt) = do
   Base.exec conn stmt
 
 -- | Execute a multi-row @INSERT@, @UPDATE@, or other SQL query that is not
