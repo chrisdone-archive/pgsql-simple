@@ -45,6 +45,7 @@ data Result =
    ,resultError :: Maybe L.ByteString
    ,resultNotices :: [String]
    ,resultType :: MessageType
+   ,resultTagRows :: Maybe Integer
   } deriving Show
 
 -- | An internal message type.

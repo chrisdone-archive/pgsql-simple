@@ -67,7 +67,7 @@ module Database.PostgreSQL.Simple
     -- , forEach
     -- , forEach_
     -- * Statements that do not return results
-    -- , execute
+    , execute
     -- , execute_
     -- , executeMany
 --    , Base.insertID
@@ -84,7 +84,7 @@ module Database.PostgreSQL.Simple
 import Blaze.ByteString.Builder (Builder, fromByteString, toByteString)
 import Blaze.ByteString.Builder.Char8 (fromChar)
 import Control.Applicative ((<$>), pure)
-import Control.Exception (Exception, throw)
+import Control.Exception (Exception, throw, onException)
 import Control.Monad (forM)
 import Data.ByteString (ByteString)
 import Data.List (intersperse)
@@ -158,7 +158,7 @@ formatMany q@(Query template) qs = do
       return . toByteString . mconcat $ fromByteString before :
                                         intersperse (fromChar ',') bs ++
                                         [fromByteString after]
-    _ -> error "foo" -- FIXME:
+    _ -> error "formatMany: The query did not match the documented format."
   where
    re = compile "^([^?]+\\bvalues\\s*)\
                  \(\\(\\s*[?](?:\\s*,\\s*[?])*\\s*\\))\
@@ -168,7 +168,7 @@ formatMany q@(Query template) qs = do
 buildQuery :: Query -> ByteString -> [Action] -> IO Builder
 buildQuery q template xs = zipParams (split template) <$> mapM sub xs
   where sub (Plain b)  = pure b
-        sub (Escape s) = pure $ (inQuotes . fromByteString . escape) s
+        sub (Escape s) = pure $ (inQuotes . fromByteString . Base.escapeBS) s
         sub (Many ys)  = mconcat <$> mapM sub ys
         split s = fromByteString h : if B.null t then [] else split (B.tail t)
             where (h,t) = B.break (=='?') s
@@ -177,48 +177,32 @@ buildQuery q template xs = zipParams (split template) <$> mapM sub xs
         zipParams _ _ = fmtError (show (B.count '?' template) ++
                                   " '?' characters, but " ++
                                   show (length xs) ++ " parameters") q xs
--- FIXME:
-escape :: ByteString -> ByteString
-escape = id
 
--- FIXME:
--- -- | Execute an @INSERT@, @UPDATE@, or other SQL query that is not
--- -- expected to return results.
--- --
--- -- Returns the number of rows affected.
--- --
--- -- Throws 'FormatError' if the query could not be formatted correctly.
--- execute :: (QueryParams q) => Connection -> Query -> q -> IO Int64
--- execute conn template qs = do
---   Base.query conn =<< formatQuery template qs
---   finishExecute conn template
+-- | Execute an @INSERT@, @UPDATE@, or other SQL query that is not
+-- expected to return results.
+--
+-- Returns the number of rows affected.
+--
+-- Throws 'FormatError' if the query could not be formatted correctly.
+execute :: (QueryParams q) => Connection -> Query -> q -> IO Integer
+execute conn template qs = do
+  Base.exec conn =<< formatQuery template qs
 
--- -- | A version of 'execute' that does not perform query substitution.
--- execute_ :: Connection -> Query -> IO Int64
--- execute_ conn q@(Query stmt) = do
---   Base.query conn stmt
---   finishExecute conn q
+-- | A version of 'execute' that does not perform query substitution.
+execute_ :: Connection -> Query -> IO Integer
+execute_ conn q@(Query stmt) = do
+  Base.exec conn stmt
 
--- -- | Execute a multi-row @INSERT@, @UPDATE@, or other SQL query that is not
--- -- expected to return results.
--- --
--- -- Returns the number of rows affected.
--- --
--- -- Throws 'FormatError' if the query could not be formatted correctly.
--- executeMany :: (QueryParams q) => Connection -> Query -> [q] -> IO Int64
--- executeMany _ _ [] = return 0
--- executeMany conn q qs = do
---   Base.query conn =<< formatMany q qs
---   finishExecute conn q
-
--- finishExecute :: Connection -> Query -> IO Int64
--- finishExecute conn q = do
---   return 0
-  -- ncols <- Base.fieldCount (Left conn)
-  -- if ncols /= 0
-  --   then throwIO $ QueryError ("execute resulted in " ++ show ncols ++
-  --                              "-column result") q
-  --   else Base.affectedRows conn
+-- | Execute a multi-row @INSERT@, @UPDATE@, or other SQL query that is not
+-- expected to return results.
+--
+-- Returns the number of rows affected.
+--
+-- Throws 'FormatError' if the query could not be formatted correctly.
+executeMany :: (QueryParams q) => Connection -> Query -> [q] -> IO Integer
+executeMany _ _ [] = return 0
+executeMany conn q qs = do
+  Base.exec conn =<< formatMany q qs
 
 -- | Perform a @SELECT@ or other SQL query that is expected to return
 -- results. All results are retrieved and converted before this
@@ -260,12 +244,12 @@ query_ conn (Query q) = do
 -- If the action throws /any/ kind of exception (not just a
 -- MySQL-related exception), the transaction will be rolled back using
 -- 'Base.rollback', then the exception will be rethrown.
--- withTransaction :: Connection -> IO a -> IO a
--- withTransaction conn act = do
---   _ <- execute_ conn "start transaction"
---   r <- act `onException` Base.rollback conn
---   Base.commit conn
---   return r
+withTransaction :: Connection -> IO a -> IO a
+withTransaction conn act = do
+  Base.begin conn
+  r <- act `onException` Base.rollback conn
+  Base.commit conn
+  return r
 
 fmtError :: String -> Query -> [Action] -> a
 fmtError msg q xs = throw FormatError {

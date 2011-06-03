@@ -34,27 +34,6 @@ import           Network
 import           Prelude
 import           System.IO                 hiding (hPutStr)
 
--- | Escape a string for PostgreSQL.
-escape :: String -> String
-escape ('\'':cs) = '\'' : '\'' : escape cs
-escape (c:cs) = c : escape cs
-escape [] = []
-
--- -- FIXME:
--- insertID :: Connection -> IO Word64
--- insertID _ = return 0
-
--- FIXME:
--- | Turn autocommit on or off.
---
--- By default, PostgreSQL runs with autocommit mode enabled. In this
--- mode, as soon as you modify a table, PostgreSQL stores your
--- modification permanently.
--- autocommit :: Connection -> Bool -> IO ()
--- autocommit conn onOff = withConnection conn $ \ptr ->
---   mysql_autocommit ptr b >>= check "autocommit" conn
---   where b = if onOff then 1 else 0
-
 --------------------------------------------------------------------------------
 -- Exported values
 
@@ -100,14 +79,22 @@ connect connectInfo@ConnectInfo{..} = liftIO $ withSocketsDo $ do
 withDB :: (MonadCatchIO m,MonadIO m) => ConnectInfo -> (Connection -> m a) -> m a
 withDB connectInfo m = E.bracket (liftIO $ connect connectInfo) (liftIO . close) m
 
+-- | Rollback a transaction.
 rollback :: (MonadCatchIO m,MonadIO m) => Connection -> m ()
 rollback conn = do
-  _ <- query conn (fromString ("ABORT;" :: String))
+  _ <- exec conn (fromString ("ABORT;" :: String))
   return ()
 
+-- | Commit a transaction.
 commit :: (MonadCatchIO m,MonadIO m) => Connection -> m ()
 commit conn = do
-  _ <- query conn (fromString ("COMMIT;" :: String))
+  _ <- exec conn (fromString ("COMMIT;" :: String))
+  return ()
+
+-- | Begin a transaction.
+begin :: (MonadCatchIO m,MonadIO m) => Connection -> m ()
+begin conn = do
+  _ <- exec conn (fromString ("BEGIN;" :: String))
   return ()
 
 -- | Close a connection. Can safely be called any number of times.
@@ -125,7 +112,18 @@ query :: MonadIO m
       => Connection -- ^ The connection.
       -> ByteString              -- ^ The query.
       -> m ([Field],[[Maybe ByteString]])
-query conn sql = liftIO $ do
+query conn sql = do
+  result <- execQuery conn sql
+  case result of
+    (_,Just ok) -> return ok
+    _           -> error "query: No results returned."
+
+-- | Run a simple query on a connection.
+execQuery :: MonadIO m
+      => Connection -- ^ The connection.
+      -> ByteString              -- ^ The query.
+      -> m (Integer,Maybe ([Field],[[Maybe ByteString]]))
+execQuery conn sql = liftIO $ do
   withConnection conn $ \h -> do
     types <- readMVar $ connectionObjects conn
     Result{..} <- sendQuery types h sql
@@ -133,13 +131,33 @@ query conn sql = liftIO $ do
       ErrorResponse -> error "TODO: query.ErrorResponse error"
       EmptyQueryResponse -> error "TODO: query.EmptyQueryResponse error"
       _             ->
-        case resultDesc of
-          Just fields -> return (fields,resultRows)
-          Nothing     -> error "TODO: query.Fields error"
+        let tagCount = fromMaybe 0 resultTagRows
+        in case resultDesc of
+             Just fields -> return $ (tagCount,Just (fields,resultRows))
+             Nothing     -> return $ (tagCount,Nothing)
+
+exec :: MonadIO m
+     => Connection
+     -> ByteString
+     -> m Integer
+exec conn sql = do
+  result <- execQuery conn sql
+  case result of
+    (ok,_) -> return ok
 
 -- | PostgreSQL protocol version supported by this library.    
 protocolVersion :: Int32
 protocolVersion = 196608
+
+-- | Escape a string for PostgreSQL.
+escape :: String -> String
+escape ('\'':cs) = '\'' : '\'' : escape cs
+escape (c:cs) = c : escape cs
+escape [] = []
+
+-- | Escape a string for PostgreSQL.
+escapeBS :: ByteString -> ByteString
+escapeBS = fromString . escape . toString
 
 --------------------------------------------------------------------------------
 -- Authentication
@@ -185,10 +203,15 @@ objectIds h = do
       ErrorResponse -> error "objectIds: ErrorResponse"
       _ -> return $ M.fromList $ catMaybes $ flip map resultRows $ \row ->
              case map toString $ catMaybes row of
-               [typ,objId] -> Just $ (ObjectId (read objId),typ)
-               _           -> Nothing
+               [typ,readMay -> Just objId] -> Just $ (ObjectId objId,typ)
+               _                           -> Nothing
 
   where q = fromString ("SELECT typname, oid FROM pg_type" :: String)
+
+readMay :: Read a => String -> Maybe a
+readMay x = case reads x of
+              [(v,"")] -> return v
+              _        -> Nothing
 
 --------------------------------------------------------------------------------
 -- Queries and commands
@@ -207,7 +230,8 @@ sendQuery types h sql = do
       listenPassively -> do
         case listenPassively of
           EmptyQueryResponse -> setStatus
-          CommandComplete    -> setStatus
+          CommandComplete    -> do setStatus
+                                   setCommandTag block
           ErrorResponse -> do
             modify $ \r -> r { resultError = Just block }
             setStatus
@@ -218,8 +242,22 @@ sendQuery types h sql = do
 
         continue
 
-  where emptyResponse = Result [] Nothing Nothing [] UnknownMessageType
+  where emptyResponse = Result [] Nothing Nothing [] UnknownMessageType Nothing
         listener m = execStateT (fix m) emptyResponse
+
+-- | CommandComplete returns a ‘tag’ which indicates how many rows were
+-- affected, or returned, as a result of the command.
+-- See http://developer.postgresql.org/pgdocs/postgres/protocol-message-formats.html
+setCommandTag :: MonadState Result m => L.ByteString -> m ()
+setCommandTag block = do
+  modify $ \r -> r { resultTagRows = rows }
+    where rows =
+            case tag block of
+              ["INSERT",_oid,readMay -> Just rows]         -> return rows
+              [cmd,readMay -> Just rows] | cmd `elem` cmds -> return rows
+              _                                            -> Nothing
+          tag = words . concat . map toString . L.toChunks . runGet getString
+          cmds = ["DELETE","UPDATE","SELECT","MOVE","FETCH"]
 
 -- | Update the row description of the result.
 getRowDesc :: MonadState Result m => Map ObjectId String -> L.ByteString -> m ()
