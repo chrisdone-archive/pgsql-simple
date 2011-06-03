@@ -23,15 +23,14 @@ module Database.PostgreSQL.Simple.Result
     , ResultError(..)
     ) where
 
--- FIXME: What's this for?
 #include "MachDeps.h"
 
-import Control.Applicative ((<$>), (<*>), (<*), (<|>), pure)
+import Control.Applicative ((<$>), (<*>), (<*), (<|>))
 import Control.Exception (Exception, throw)
 import Data.Attoparsec.Char8 hiding (Result)
 import Data.Bits ((.&.), (.|.), shiftL)
 import Data.ByteString (ByteString)
-import Data.Int (Int8, Int16, Int32, Int64)
+import Data.Int (Int16, Int32, Int64)
 import Data.List (foldl')
 import Data.Ratio (Ratio)
 import Data.Time.Calendar (Day, fromGregorian)
@@ -39,7 +38,7 @@ import Data.Time.Clock (UTCTime)
 import Data.Time.Format (parseTime)
 import Data.Time.LocalTime (TimeOfDay,LocalTime,ZonedTime,makeTimeOfDayValid)
 import Data.Typeable (TypeRep, Typeable, typeOf)
-import Data.Word (Word, Word8, Word16, Word32, Word64)
+import Data.Word (Word, Word16, Word32, Word64)
 import Database.PostgreSQL.Base.Types (Field(..),Type(..),FormatCode(..))
 import System.Locale (defaultTimeLocale)
 import qualified Data.ByteString as SB
@@ -83,7 +82,7 @@ instance (Result a) => Result (Maybe a) where
     convert f bs      = Just (convert f bs)
 
 instance Result Bool where
-    convert f (Just t)
+    convert _ (Just t)
       | str == "t" = True
       | str == "f" = False
      where str = B8.unpack t

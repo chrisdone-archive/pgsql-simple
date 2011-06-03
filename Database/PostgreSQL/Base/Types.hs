@@ -1,3 +1,4 @@
+{-# OPTIONS -Wall #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 module Database.PostgreSQL.Base.Types
   (ConnectInfo(..)
@@ -15,13 +16,9 @@ module Database.PostgreSQL.Base.Types
 import Control.Concurrent.MVar (MVar)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
-import Data.String (IsString)
-import Data.Text
 import Data.Int
-import Data.Time
 import Data.Typeable
 import Data.Word
-import Network (PortID)
 import System.IO (Handle)
 import Data.Map (Map)
 
@@ -64,51 +61,11 @@ data MessageType =
   | UnknownMessageType
     deriving (Show,Eq)
 
--- | Description of a postgres row.
-type RowDescription = [(L.ByteString
-                       ,Int32
-                       ,Int16
-                       ,Int32
-                       ,Int16
-                       ,Int32
-                       ,Int16)]
-
--- | FIXME: Come up with something for this based on postgres's features.
+-- | A field description.
 data Field = Field {
     fieldType :: Type
    ,fieldFormatCode :: FormatCode
   } deriving Show
-
--- FIXME: Update to proper supported types.
--- | Column types supported by PostgreSQL.
--- data Type = Decimal
---           | Tiny
---           | Short
---           | Long
---           | Float
---           | Double
---           | Null
---           | Timestamp
---           | LongLong
---           | Int24
---           | Date
---           | Time
---           | DateTime
---           | Year
---           | NewDate
---           | VarChar
---           | Bit
---           | NewDecimal
---           | Enum
---           | Set
---           | TinyBlob
---           | MediumBlob
---           | LongBlob
---           | Blob
---           | VarString
---           | String
---           | Geometry
---             deriving (Enum, Eq, Show, Typeable)
 
 data Type = 
   -- These types ought to properly match their corresponding

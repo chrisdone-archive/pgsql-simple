@@ -23,7 +23,6 @@ import           Data.Binary.Put
 import qualified Data.ByteString           as B
 import           Data.ByteString           (ByteString)
 import qualified Data.ByteString.Lazy      as L
-import qualified Data.ByteString.Lazy.UTF8 as UTF8
 import           Data.ByteString.UTF8      (toString,fromString)
 import           Data.Int
 import           Data.List
@@ -35,13 +34,15 @@ import           Network
 import           Prelude
 import           System.IO                 hiding (hPutStr)
 
--- FIXME: Proper escape function.
+-- | Escape a string for PostgreSQL.
 escape :: String -> String
-escape str = undefined
+escape ('\'':cs) = '\'' : '\'' : escape cs
+escape (c:cs) = c : escape cs
+escape [] = []
 
--- FIXME:
-insertID :: Connection -> IO Word64
-insertID _ = return 0
+-- -- FIXME:
+-- insertID :: Connection -> IO Word64
+-- insertID _ = return 0
 
 -- FIXME:
 -- | Turn autocommit on or off.
@@ -49,10 +50,10 @@ insertID _ = return 0
 -- By default, PostgreSQL runs with autocommit mode enabled. In this
 -- mode, as soon as you modify a table, PostgreSQL stores your
 -- modification permanently.
-autocommit :: Connection -> Bool -> IO ()
-autocommit conn onOff = return () -- withConnection conn $ \ptr ->
- --   mysql_autocommit ptr b >>= check "autocommit" conn
- -- where b = if onOff then 1 else 0
+-- autocommit :: Connection -> Bool -> IO ()
+-- autocommit conn onOff = withConnection conn $ \ptr ->
+--   mysql_autocommit ptr b >>= check "autocommit" conn
+--   where b = if onOff then 1 else 0
 
 --------------------------------------------------------------------------------
 -- Exported values
@@ -101,12 +102,12 @@ withDB connectInfo m = E.bracket (liftIO $ connect connectInfo) (liftIO . close)
 
 rollback :: (MonadCatchIO m,MonadIO m) => Connection -> m ()
 rollback conn = do
-  query conn (fromString ("ABORT;" :: String))
+  _ <- query conn (fromString ("ABORT;" :: String))
   return ()
 
 commit :: (MonadCatchIO m,MonadIO m) => Connection -> m ()
 commit conn = do
-  query conn (fromString ("COMMIT;" :: String))
+  _ <- query conn (fromString ("COMMIT;" :: String))
   return ()
 
 -- | Close a connection. Can safely be called any number of times.
@@ -212,7 +213,7 @@ sendQuery types h sql = do
             setStatus
           RowDescription -> getRowDesc types block
           DataRow        -> getDataRow block
-          NoticeResponse -> getNotice block
+          -- NoticeResponse -> getNotice block
           _ -> return ()
 
         continue
@@ -267,16 +268,16 @@ parseFields :: Map ObjectId String
             -> [(L.ByteString,Int32,Int16,Int32,Int16,Int32,Int16)]
             -> [Field]
 parseFields types = map parse where
-  parse (fieldName
-        ,parseObjId        -> objectId
-        ,parseAttrId       -> attrId
+  parse (_fieldName
+        ,_ -- parseObjId        -> _objectId
+        ,_ -- parseAttrId       -> _attrId
         ,parseType types   -> typ
-        ,parseSize         -> typeSize
-        ,parseModifier typ -> typeModifier
+        ,_ -- parseSize         -> _typeSize
+        ,_ -- parseModifier typ -> _typeModifier
         ,parseFormatCode   -> formatCode)
     = Field {
       fieldType = typ
-    , fieldFormatCode = TextCode
+    , fieldFormatCode = formatCode
     }
 
 -- | Parse an object ID. 0 means no object.
@@ -296,11 +297,12 @@ parseType types objId =
     Just name -> case typeFromName name of
                    Just typ -> typ
                    Nothing -> error $ "parseType: Unknown type: " ++ show name
-    typ       -> error $ "parseType: Unable to parse type: " ++ show objId
+    _ -> error $ "parseType: Unable to parse type: " ++ show objId
 
 typeFromName :: String -> Maybe Type
 typeFromName = flip lookup fieldTypes
 
+fieldTypes :: [(String, Type)]
 fieldTypes =
   [("bool",Boolean)
   ,("int2",Short)
@@ -341,9 +343,9 @@ getDataRow block =
                          return (Just v)
 
 -- TODO:
-getNotice :: MonadState Result m => L.ByteString -> m ()
-getNotice block =
-  return ()
+-- getNotice :: MonadState Result m => L.ByteString -> m ()
+-- getNotice block =
+--   return ()
 --  modify $ \r -> r { responseNotices = runGet parseMsg block : responseNotices r }
 --    where parseMsg = return ""
 
@@ -353,6 +355,7 @@ typeFromChar c = lookup c types
 charFromType :: MessageType -> Maybe Char
 charFromType typ = fmap fst $ find ((==typ).snd) types
 
+types :: [(Char, MessageType)]
 types = [('C',CommandComplete)
         ,('T',RowDescription)
         ,('D',DataRow)
@@ -370,7 +373,7 @@ waitForReady h = loop where
   (typ,block) <- getMessage h
   case typ of
     ReadyForQuery | decode block == 'I' -> return ()
-    diff                      -> loop
+    _                                   -> loop
 
 --------------------------------------------------------------------------------
 -- Connections
