@@ -1,5 +1,5 @@
 name:           pgsql-simple
-version:        0.0
+version:        0.0.1
 homepage:       https://github.com/chrisdone/pgsql-simple
 bug-reports:    https://github.com/chrisdone/pgsql-simple/issues
 synopsis:       A mid-level PostgreSQL client library.
@@ -25,6 +25,9 @@ library
     Database.PostgreSQL.Simple.QueryResults
     Database.PostgreSQL.Simple.Result
     Database.PostgreSQL.Simple.Types
+  other-modules:
+    Database.PostgreSQL.Base
+    Database.PostgreSQL.Base.Types
 
   build-depends:
     attoparsec >= 0.8.5.3,
