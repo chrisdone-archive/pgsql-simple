@@ -11,28 +11,27 @@ import           Database.PostgreSQL.Base.Types
 
 import           Control.Concurrent
 import           Control.Monad
-import           Control.Monad.State (MonadState,execStateT,modify)
+import           Control.Monad.CatchIO          (MonadCatchIO)
+import qualified Control.Monad.CatchIO          as E
 import           Control.Monad.Fix
-import           Control.Monad.CatchIO     (MonadCatchIO -- ,onException
- )
-import qualified Control.Monad.CatchIO     as E
+import           Control.Monad.State            (MonadState,execStateT,modify)
 import           Control.Monad.Trans
 import           Data.Binary
 import           Data.Binary.Get
 import           Data.Binary.Put
-import qualified Data.ByteString           as B
-import           Data.ByteString           (ByteString)
-import qualified Data.ByteString.Lazy      as L
-import           Data.ByteString.UTF8      (toString,fromString)
+import           Data.ByteString                (ByteString)
+import qualified Data.ByteString                as B
+import qualified Data.ByteString.Lazy           as L
+import           Data.ByteString.UTF8           (toString,fromString)
 import           Data.Int
 import           Data.List
+import           Data.Map                       (Map)
+import qualified Data.Map                       as M
 import           Data.Maybe
 import           Data.Monoid
-import qualified Data.Map as M
-import           Data.Map (Map)
 import           Network
 import           Prelude
-import           System.IO                 hiding (hPutStr)
+import           System.IO                      hiding (hPutStr)
 
 --------------------------------------------------------------------------------
 -- Exported values
