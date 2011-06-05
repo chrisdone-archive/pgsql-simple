@@ -62,6 +62,49 @@ defaultConnectInfo = ConnectInfo {
                      , connectDatabase = ""
                      }
 
+-- | Create a new connection pool.
+newPool :: MonadIO m
+        => ConnectInfo -- ^ Connect info.
+        -> m Pool
+newPool info = liftIO $ do
+  var <- newMVar $ PoolState {
+    poolConnections = []
+  , poolConnectInfo = info
+  }
+  return $ Pool var
+
+-- | Connect using the connection pool.
+pconnect :: MonadIO m => Pool -> m Connection
+pconnect (Pool var) = liftIO $ do
+  modifyMVar var $ \state@PoolState{..} -> do
+    case poolConnections of
+      []           -> do conn <- connect poolConnectInfo
+                         return (state,conn)
+      (conn:conns) -> return (state { poolConnections = conns },conn)
+
+-- | Restore a connection to the pool.
+restore :: MonadIO m => Pool -> Connection -> m ()
+restore (Pool var) conn = liftIO $ do
+  handle <- readMVar $ connectionHandle conn
+  modifyMVar_ var $ \state -> do
+    case handle of
+      Nothing -> return state
+      Just h -> do
+        eof <- hIsOpen h
+        if eof
+           then return state { poolConnections = conn : poolConnections state }
+           else return state
+
+-- | Use the connection pool.
+withPoolConnection
+  :: (MonadCatchIO m,MonadIO m)
+  => Pool                 -- ^ The connection pool.
+  -> (Connection -> m a) -- ^ Use the connection.
+  -> m ()
+withPoolConnection pool m = do
+  _ <- E.bracket (pconnect pool) (restore pool) m
+  return ()
+
 -- | Connect with the given username to the given database. Will throw
 --   an exception if it cannot connect.
 connect :: MonadIO m => ConnectInfo -> m Connection -- ^ The datase connection.
@@ -75,8 +118,8 @@ connect connectInfo@ConnectInfo{..} = liftIO $ withSocketsDo $ do
   authenticate conn connectInfo
   return conn
 
-withDB :: (MonadCatchIO m,MonadIO m) => ConnectInfo -> (Connection -> m a) -> m a
-withDB connectInfo m = E.bracket (liftIO $ connect connectInfo) (liftIO . close) m
+-- withDB :: (MonadCatchIO m,MonadIO m) => ConnectInfo -> (Connection -> m a) -> m a
+-- withDB connectInfo m = E.bracket (liftIO $ connect connectInfo) (liftIO . close) m
 
 -- | Rollback a transaction.
 rollback :: (MonadCatchIO m,MonadIO m) => Connection -> m ()

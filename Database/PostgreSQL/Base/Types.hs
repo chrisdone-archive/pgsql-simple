@@ -10,7 +10,9 @@ module Database.PostgreSQL.Base.Types
   ,Size(..)
   ,FormatCode(..)
   ,Modifier(..)
-  ,ObjectId(..))
+  ,ObjectId(..)
+  ,Pool(..)
+  ,PoolState(..))
   where
 
 import Control.Concurrent.MVar (MVar)
@@ -69,41 +71,19 @@ data Field = Field {
   } deriving Show
 
 data Type = 
-  -- These types ought to properly match their corresponding
-  -- size in the database.
     Short      -- ^ 2 bytes, small-range integer
   | Long       -- ^ 4 bytes, usual choice for integer
   | LongLong   -- ^ 8 bytes	large-range integer
-  
-  -- -- TODO: This choice for Decimal seems, pardon me,
-  -- -- rational, as the precision ought to be
-  -- -- infinite. However, I'm not confident in the choice.
   | Decimal -- ^ variable, user-specified precision, exact, no limit
   | Numeric -- ^ variable, user-specified precision, exact, no limit
-  
-  -- -- TODO: For the IEEE floating points, use isNaN and
-  -- -- isInfinite.
-  -- -- <http://www.postgresql.org/docs/current/static/datatype-numeric.html>
   | Real             -- ^ 4 bytes, variable-precision, inexact
   | DoublePrecision -- ^ 8 bytes, variable-precision, inexact
-  -- --
-  -- | Serial Int32    -- ^ 4 bytes, autoincrementing integer
-  -- | BigSerial Int64 -- ^ 8 bytes, large autoincrementing integer
-
-  -- -- TODO: Is Money a double?
-  -- | Money Double -- ^ 8 bytes, currency amount.
-  -- -- See <http://www.postgresql.org/docs/current/static/datatype-money.html> for
-  -- -- more information.
 
   | CharVarying -- ^ character varying(n), varchar(n), variable-length
   | Characters  -- ^ character(n), char(n), fixed-length
   | Text        -- ^ text, variable unlimited length
               -- 
               -- Lazy. Decoded from UTF-8 into Haskell native encoding.
- --  | Bytes ByteString   -- ^ 1 or 4 bytes plus the actual binary string
-  -- 
-  -- See <http://www.postgresql.org/docs/current/static/datatype-binary.html>
-  -- for more information on this type. Strict.
 
   | Boolean -- ^ boolean, 1 byte, state of true or false
 
@@ -114,8 +94,6 @@ data Type =
   | TimestampWithZone -- ^ timestamp /with/ time zone
   | Date              -- ^ date, 4 bytes	julian day
   | Time              -- ^ 8 bytes, time of day (no date)
-  -- | ZonedTime ZonedTime         -- ^ 12 bytes, times of day only, with time zone
-  -- | Interval DiffTime           -- ^ 12 bytes	time interval
 
    deriving (Eq,Enum,Show)
 
@@ -133,3 +111,11 @@ data Modifier = Modifier
 -- | A PostgreSQL object ID.
 newtype ObjectId = ObjectId Int32
   deriving (Eq,Ord,Show)
+
+-- | A connection pool.
+data PoolState = PoolState {
+    poolConnections :: [Connection]
+  , poolConnectInfo :: ConnectInfo
+  }
+
+newtype Pool = Pool { unPool :: MVar PoolState }

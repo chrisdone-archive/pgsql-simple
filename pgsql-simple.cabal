@@ -1,5 +1,5 @@
 name:           pgsql-simple
-version:        0.0.3
+version:        0.1.1
 homepage:       https://github.com/chrisdone/pgsql-simple
 bug-reports:    https://github.com/chrisdone/pgsql-simple/issues
 synopsis:       A mid-level PostgreSQL client library.
@@ -43,11 +43,11 @@ library
     network >= 2.2,
     binary >= 0.5,
     mtl >= 2.0,
-    MonadCatchIO-mtl >= 0.3,
+    MonadCatchIO-transformers >= 0.2,
     utf8-string >= 0.3 && < 0.4,
     containers >= 0.3
 
-  ghc-options: -Wall
+  ghc-options: -Wall -O2
   if impl(ghc >= 6.8)
     ghc-options: -fwarn-tabs
 

@@ -50,11 +50,14 @@ module Database.PostgreSQL.Simple
     , In(..)
     , Binary(..)
     , Only(..)
+    , Pool
     -- ** Exceptions
     , FormatError(fmtMessage, fmtQuery, fmtParams)
     , QueryError(qeMessage, qeQuery)
     , ResultError(errSQLType, errHaskellType, errMessage)
     -- * Connection management
+    , Base.newPool
+    , Base.withPoolConnection
     , Base.connect
     , Base.defaultConnectInfo
     , Base.close
@@ -88,7 +91,7 @@ import Data.ByteString (ByteString)
 import Data.List (intersperse)
 import Data.Monoid (mappend, mconcat)
 import Data.Typeable (Typeable)
-import Database.PostgreSQL.Base.Types (ConnectInfo(..),Connection(..))
+import Database.PostgreSQL.Base.Types (ConnectInfo(..),Connection(..),Pool)
 import Database.PostgreSQL.Simple.Param (Action(..), inQuotes)
 import Database.PostgreSQL.Simple.QueryParams (QueryParams(..))
 import Database.PostgreSQL.Simple.QueryResults (QueryResults(..))
