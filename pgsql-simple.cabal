@@ -1,5 +1,5 @@
 name:           pgsql-simple
-version:        0.0.1
+version:        0.0.3
 homepage:       https://github.com/chrisdone/pgsql-simple
 bug-reports:    https://github.com/chrisdone/pgsql-simple/issues
 synopsis:       A mid-level PostgreSQL client library.

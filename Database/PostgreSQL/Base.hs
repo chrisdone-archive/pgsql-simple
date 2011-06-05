@@ -150,6 +150,7 @@ protocolVersion = 196608
 
 -- | Escape a string for PostgreSQL.
 escape :: String -> String
+escape ('\\':cs) = '\\' : '\\' : escape cs
 escape ('\'':cs) = '\'' : '\'' : escape cs
 escape (c:cs) = c : escape cs
 escape [] = []
@@ -224,7 +225,8 @@ sendQuery types h sql = do
 --    liftIO $ putStrLn $ show (typ,block)
     let setStatus = modify $ \r -> r { resultType = typ }
     case typ of
-      ReadyForQuery -> return ()
+      ReadyForQuery ->
+        modify $ \r -> r { resultRows = reverse (resultRows r) }
 
       listenPassively -> do
         case listenPassively of
