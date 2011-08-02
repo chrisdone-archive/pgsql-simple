@@ -15,7 +15,8 @@ module Database.PostgreSQL.Base
   ,connect
   ,defaultConnectInfo
   ,close
-  ,withDB)
+  ,withDB
+  ,withTransaction)
   where
 
 import           Database.PostgreSQL.Base.Types
@@ -33,6 +34,7 @@ import           Data.Binary.Put
 import           Data.ByteString                (ByteString)
 import qualified Data.ByteString                as B
 import qualified Data.ByteString.Lazy           as L
+import qualified Data.ByteString.Lazy.UTF8      as L (toString)
 import           Data.ByteString.UTF8           (toString,fromString)
 import           Data.Int
 import           Data.List
@@ -87,9 +89,17 @@ connect connectInfo@ConnectInfo{..} = liftIO $ withSocketsDo $ do
   return conn
 
 -- | Run a an action with a connection and close the connection
---   afterwards (handles exceptions).
+--   afterwards (protects against exceptions).
 withDB :: (MonadCatchIO m,MonadIO m) => ConnectInfo -> (Connection -> m a) -> m a
 withDB connectInfo m = E.bracket (liftIO $ connect connectInfo) (liftIO . close) m
+
+-- | With a transaction, do some action (protects against exceptions).
+withTransaction :: (MonadCatchIO m,MonadIO m) => Connection -> m a -> m a
+withTransaction conn act = do
+  begin conn
+  r <- act `E.onException` rollback conn
+  commit conn
+  return r
 
 -- | Rollback a transaction.
 rollback :: (MonadCatchIO m,MonadIO m) => Connection -> m ()
@@ -120,7 +130,7 @@ close Connection{connectionHandle} = liftIO$ do
     return Nothing
 
 -- | Run a simple query on a connection.
-query :: MonadIO m
+query :: (MonadCatchIO m)
       => Connection -- ^ The connection.
       -> ByteString              -- ^ The query.
       -> m ([Field],[[Maybe ByteString]])
@@ -128,10 +138,10 @@ query conn sql = do
   result <- execQuery conn sql
   case result of
     (_,Just ok) -> return ok
-    _           -> error "query: No results returned."
+    _           -> return ([],[])
 
 -- | Run a simple query on a connection.
-execQuery :: MonadIO m
+execQuery :: (MonadCatchIO m)
       => Connection -- ^ The connection.
       -> ByteString              -- ^ The query.
       -> m (Integer,Maybe ([Field],[[Maybe ByteString]]))
@@ -140,8 +150,8 @@ execQuery conn sql = liftIO $ do
     types <- readMVar $ connectionObjects conn
     Result{..} <- sendQuery types h sql
     case resultType of
-      ErrorResponse -> error "TODO: query.ErrorResponse error"
-      EmptyQueryResponse -> error "TODO: query.EmptyQueryResponse error"
+      ErrorResponse -> E.throw $ QueryError (fmap L.toString resultError)
+      EmptyQueryResponse -> E.throw QueryEmpty
       _             ->
         let tagCount = fromMaybe 0 resultTagRows
         in case resultDesc of
@@ -149,7 +159,7 @@ execQuery conn sql = liftIO $ do
              Nothing     -> return $ (tagCount,Nothing)
 
 -- | Exec a command.
-exec :: MonadIO m
+exec :: (MonadCatchIO m)
      => Connection
      -> ByteString
      -> m Integer
@@ -198,14 +208,13 @@ sendStartUp h ConnectInfo{..} = do
 getConnectInfoResponse :: Handle -> IO ()
 getConnectInfoResponse h = do
   (typ,block) <- getMessage h
+  -- TODO: Handle connectInfo failure. Handle information messages that are
+  --       sent, maybe store in the connection value for later
+  --       inspection.
   case typ of
     AuthenticationOk | param == 0 -> waitForReady h
         where param = decode block :: Int32
-    -- TODO: Handle connectInfo failure. Handle information messages that are
-    --       sent, maybe store in the connection value for later
-    --       inspection.
-    -- FIXME:
-    _ -> error "getConnectInfoResponse: authentication failed."
+    _ -> E.throw AuthenticationFailed
 
 --------------------------------------------------------------------------------
 -- Initialization
@@ -214,7 +223,7 @@ objectIds :: Handle -> IO (Map ObjectId String)
 objectIds h = do
     Result{..} <- sendQuery M.empty h q
     case resultType of
-      ErrorResponse -> error "objectIds: ErrorResponse"
+      ErrorResponse -> E.throw $ InitializationError "Couldn't get types."
       _ -> return $ M.fromList $ catMaybes $ flip map resultRows $ \row ->
              case map toString $ catMaybes row of
                [typ,readMay -> Just objId] -> Just $ (ObjectId objId,typ)
@@ -231,7 +240,6 @@ sendQuery types h sql = do
   sendMessage h Query $ string sql
   listener $ \continue -> do
     (typ,block) <- liftIO $ getMessage h
---    liftIO $ putStrLn $ show (typ,block)
     let setStatus = modify $ \r -> r { resultType = typ }
     case typ of
       ReadyForQuery ->
@@ -254,6 +262,16 @@ sendQuery types h sql = do
 
   where emptyResponse = Result [] Nothing Nothing [] UnknownMessageType Nothing
         listener m = execStateT (fix m) emptyResponse
+
+-- parseErr :: 
+-- parseErr = loop where
+--   loop = do
+--     errtype <- get
+--     if (errtype == (0 :: Word8))
+--        then return []
+--        else let x = (errtype)
+--             in do xs <- loop
+--                   return (x : xs)
 
 -- | CommandComplete returns a ‘tag’ which indicates how many rows were
 -- affected, or returned, as a result of the command.
@@ -436,7 +454,7 @@ withConnection Connection{..} m = do
     case h of
       Just h -> m h
       -- TODO: Use extensible exceptions.
-      Nothing -> error "Database.PostgreSQL.withConnection: Connection is lost."
+      Nothing -> E.throw ConnectionLost
 
 -- | Send a block of bytes on a handle, prepending the message type
 --   and complete length.
@@ -444,7 +462,7 @@ sendMessage :: Handle -> MessageType -> Put -> IO ()
 sendMessage h typ output =
   case charFromType typ of
     Just char -> sendBlock h (Just char) output
-    Nothing   -> return () -- TODO: Possibly throw an error. Or just ignore?
+    Nothing   -> error $ "sendMessage: Bad message type " ++ show typ
 
 -- | Send a block of bytes on a handle, prepending the complete length.
 sendBlock :: Handle -> Maybe Char -> Put -> IO ()

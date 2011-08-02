@@ -83,7 +83,7 @@ module Database.PostgreSQL.Simple
 import Blaze.ByteString.Builder (Builder, fromByteString, toByteString)
 import Blaze.ByteString.Builder.Char8 (fromChar)
 import Control.Applicative ((<$>), pure)
-import Control.Exception (Exception, throw, onException)
+import Control.Exception (Exception, throw)
 import Control.Monad (forM)
 import Data.ByteString (ByteString)
 import Data.List (intersperse)
@@ -244,11 +244,7 @@ query_ conn (Query q) = do
 -- MySQL-related exception), the transaction will be rolled back using
 -- 'Base.rollback', then the exception will be rethrown.
 withTransaction :: Connection -> IO a -> IO a
-withTransaction conn act = do
-  Base.begin conn
-  r <- act `onException` Base.rollback conn
-  Base.commit conn
-  return r
+withTransaction = Base.withTransaction
 
 fmtError :: String -> Query -> [Action] -> a
 fmtError msg q xs = throw FormatError {
