@@ -5,7 +5,18 @@
 -- | A front-end implementation for the PostgreSQL database protocol
 --   version 3.0 (implemented in PostgreSQL 7.4 and later).
 
-module Database.PostgreSQL.Base where
+module Database.PostgreSQL.Base
+  (begin
+  ,rollback
+  ,commit
+  ,query
+  ,exec
+  ,escapeBS
+  ,connect
+  ,defaultConnectInfo
+  ,close
+  ,withDB)
+  where
 
 import           Database.PostgreSQL.Base.Types
 
@@ -62,49 +73,6 @@ defaultConnectInfo = ConnectInfo {
                      , connectDatabase = ""
                      }
 
--- | Create a new connection pool.
-newPool :: MonadIO m
-        => ConnectInfo -- ^ Connect info.
-        -> m Pool
-newPool info = liftIO $ do
-  var <- newMVar $ PoolState {
-    poolConnections = []
-  , poolConnectInfo = info
-  }
-  return $ Pool var
-
--- | Connect using the connection pool.
-pconnect :: MonadIO m => Pool -> m Connection
-pconnect (Pool var) = liftIO $ do
-  modifyMVar var $ \state@PoolState{..} -> do
-    case poolConnections of
-      []           -> do conn <- connect poolConnectInfo
-                         return (state,conn)
-      (conn:conns) -> return (state { poolConnections = conns },conn)
-
--- | Restore a connection to the pool.
-restore :: MonadIO m => Pool -> Connection -> m ()
-restore (Pool var) conn = liftIO $ do
-  handle <- readMVar $ connectionHandle conn
-  modifyMVar_ var $ \state -> do
-    case handle of
-      Nothing -> return state
-      Just h -> do
-        eof <- hIsOpen h
-        if eof
-           then return state { poolConnections = conn : poolConnections state }
-           else return state
-
--- | Use the connection pool.
-withPoolConnection
-  :: (MonadCatchIO m,MonadIO m)
-  => Pool                 -- ^ The connection pool.
-  -> (Connection -> m a) -- ^ Use the connection.
-  -> m ()
-withPoolConnection pool m = do
-  _ <- E.bracket (pconnect pool) (restore pool) m
-  return ()
-
 -- | Connect with the given username to the given database. Will throw
 --   an exception if it cannot connect.
 connect :: MonadIO m => ConnectInfo -> m Connection -- ^ The datase connection.
@@ -118,8 +86,10 @@ connect connectInfo@ConnectInfo{..} = liftIO $ withSocketsDo $ do
   authenticate conn connectInfo
   return conn
 
--- withDB :: (MonadCatchIO m,MonadIO m) => ConnectInfo -> (Connection -> m a) -> m a
--- withDB connectInfo m = E.bracket (liftIO $ connect connectInfo) (liftIO . close) m
+-- | Run a an action with a connection and close the connection
+--   afterwards (handles exceptions).
+withDB :: (MonadCatchIO m,MonadIO m) => ConnectInfo -> (Connection -> m a) -> m a
+withDB connectInfo m = E.bracket (liftIO $ connect connectInfo) (liftIO . close) m
 
 -- | Rollback a transaction.
 rollback :: (MonadCatchIO m,MonadIO m) => Connection -> m ()
@@ -178,6 +148,7 @@ execQuery conn sql = liftIO $ do
              Just fields -> return $ (tagCount,Just (fields,resultRows))
              Nothing     -> return $ (tagCount,Nothing)
 
+-- | Exec a command.
 exec :: MonadIO m
      => Connection
      -> ByteString
@@ -250,11 +221,6 @@ objectIds h = do
                _                           -> Nothing
 
   where q = fromString ("SELECT typname, oid FROM pg_type" :: String)
-
-readMay :: Read a => String -> Maybe a
-readMay x = case reads x of
-              [(v,"")] -> return v
-              _        -> Nothing
 
 --------------------------------------------------------------------------------
 -- Queries and commands
@@ -362,15 +328,17 @@ parseFields types = map parse where
     , fieldFormatCode = formatCode
     }
 
--- | Parse an object ID. 0 means no object.
-parseObjId :: Int32 -> Maybe ObjectId
-parseObjId 0 = Nothing
-parseObjId n = Just (ObjectId n)
+-- These aren't used (yet).
 
--- | Parse an attribute ID. 0 means no object.
-parseAttrId :: Int16 -> Maybe ObjectId
-parseAttrId 0 = Nothing
-parseAttrId n = Just (ObjectId $ fromIntegral n)
+-- -- | Parse an object ID. 0 means no object.
+-- parseObjId :: Int32 -> Maybe ObjectId
+-- parseObjId 0 = Nothing
+-- parseObjId n = Just (ObjectId n)
+
+-- -- | Parse an attribute ID. 0 means no object.
+-- parseAttrId :: Int16 -> Maybe ObjectId
+-- parseAttrId 0 = Nothing
+-- parseAttrId n = Just (ObjectId $ fromIntegral n)
 
 -- | Parse a number into a type.
 parseType :: Map ObjectId String -> Int32 -> Type
@@ -396,15 +364,16 @@ fieldTypes =
   ,("varchar",CharVarying)
   ,("text",Text)]
 
+-- This isn't used yet.
 -- | Parse a type's size.
-parseSize :: Int16 -> Size
-parseSize (-1) = Varying
-parseSize n    = Size n
+-- parseSize :: Int16 -> Size
+-- parseSize (-1) = Varying
+-- parseSize n    = Size n
 
--- FIXME:
--- | Parse a type-specific modifier.
-parseModifier :: Type -> Int32 -> Maybe Modifier
-parseModifier _typ _modifier = Nothing
+-- This isn't used yet.
+-- -- | Parse a type-specific modifier.
+-- parseModifier :: Type -> Int32 -> Maybe Modifier
+-- parseModifier _typ _modifier = Nothing
 
 -- | Parse a format code (text or binary).
 parseFormatCode :: Int16 -> FormatCode
@@ -526,3 +495,8 @@ getInt32 = get
 
 getString :: Get L.ByteString
 getString = getLazyByteStringNul
+
+readMay :: Read a => String -> Maybe a
+readMay x = case reads x of
+              [(v,"")] -> return v
+              _        -> Nothing

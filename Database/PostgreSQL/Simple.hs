@@ -56,8 +56,6 @@ module Database.PostgreSQL.Simple
     , QueryError(qeMessage, qeQuery)
     , ResultError(errSQLType, errHaskellType, errMessage)
     -- * Connection management
-    , Base.newPool
-    , Base.withPoolConnection
     , Base.connect
     , Base.defaultConnectInfo
     , Base.close
