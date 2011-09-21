@@ -27,11 +27,11 @@ import Data.Map (Map)
 import Control.Exception (Exception)
 
 data ConnectionError =
-    QueryError (Maybe String)  -- ^ Query returned an error.
-  | QueryEmpty                 -- ^ The query was empty.
-  | AuthenticationFailed       -- ^ Connecting failed due to authentication problem.
-  | InitializationError String -- ^ Initialization (e.g. getting data types) failed.
-  | ConnectionLost             -- ^ Connection was lost when using withConnection.
+    QueryError (Maybe String)   -- ^ Query returned an error.
+  | QueryEmpty                  -- ^ The query was empty.
+  | AuthenticationFailed String -- ^ Connecting failed due to authentication problem.
+  | InitializationError String  -- ^ Initialization (e.g. getting data types) failed.
+  | ConnectionLost              -- ^ Connection was lost when using withConnection.
   deriving (Typeable,Show)
 
 instance Exception ConnectionError where

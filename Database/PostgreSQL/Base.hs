@@ -214,7 +214,7 @@ getConnectInfoResponse h = do
   case typ of
     AuthenticationOk | param == 0 -> waitForReady h
         where param = decode block :: Int32
-    _ -> E.throw AuthenticationFailed
+    _ -> E.throw $ AuthenticationFailed (show block)
 
 --------------------------------------------------------------------------------
 -- Initialization
