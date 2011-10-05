@@ -34,7 +34,7 @@ import           Data.Binary.Put
 import           Data.ByteString                (ByteString)
 import qualified Data.ByteString                as B
 import qualified Data.ByteString.Lazy           as L
-import qualified Data.ByteString.Lazy.UTF8      as L (toString)
+import qualified Data.ByteString.Lazy.UTF8      as L (toString,fromString)
 import           Data.ByteString.UTF8           (toString,fromString)
 import           Data.Int
 import           Data.List
@@ -191,7 +191,7 @@ authenticate :: Connection -> ConnectInfo -> IO ()
 authenticate conn@Connection{..} connectInfo = do
   withConnection conn $ \h -> do
     sendStartUp h connectInfo
-    getConnectInfoResponse h
+    getConnectInfoResponse h connectInfo
     objects <- objectIds h
     modifyMVar_ connectionObjects (\_ -> return objects)
 
@@ -205,16 +205,39 @@ sendStartUp h ConnectInfo{..} = do
     zero
 
 -- | Wait for and process the connectInfoentication response from the server.
-getConnectInfoResponse :: Handle -> IO ()
-getConnectInfoResponse h = do
+getConnectInfoResponse :: Handle -> ConnectInfo -> IO ()
+getConnectInfoResponse h conninfo = do
   (typ,block) <- getMessage h
   -- TODO: Handle connectInfo failure. Handle information messages that are
   --       sent, maybe store in the connection value for later
   --       inspection.
   case typ of
-    AuthenticationOk | param == 0 -> waitForReady h
+    AuthenticationOk
+      | param == 0 -> waitForReady h
+      | param == 3 -> sendPassClearText h conninfo
+--      | param == 5 -> sendPassMd5 h conninfo salt
+      | otherwise  -> E.throw $ UnsupportedAuthenticationMethod param (show block)
         where param = decode block :: Int32
-    _ -> E.throw $ AuthenticationFailed (show block)
+              _salt = flip runGet block $ do
+                        _ <- getInt32
+                        getWord8
+    
+    els -> E.throw $ AuthenticationFailed (show (els,block))
+
+-- | Send the pass as clear text and wait for connect response.
+sendPassClearText :: Handle -> ConnectInfo -> IO ()
+sendPassClearText h conninfo@ConnectInfo{..} = do
+  sendMessage h PasswordMessage $
+    string (fromString connectPassword)
+  getConnectInfoResponse h conninfo
+
+-- -- | Send the pass as salted MD5 and wait for connect response.
+-- sendPassMd5 :: Handle -> ConnectInfo -> Word8 -> IO ()
+-- sendPassMd5 h conninfo@ConnectInfo{..} salt = do
+--   -- TODO: Need md5 library with salt support.
+--   sendMessage h PasswordMessage $
+--     string (fromString connectPassword)
+--   getConnectInfoResponse h conninfo
 
 --------------------------------------------------------------------------------
 -- Initialization
@@ -255,23 +278,12 @@ sendQuery types h sql = do
             setStatus
           RowDescription -> getRowDesc types block
           DataRow        -> getDataRow block
-          -- NoticeResponse -> getNotice block
           _ -> return ()
 
         continue
 
   where emptyResponse = Result [] Nothing Nothing [] UnknownMessageType Nothing
         listener m = execStateT (fix m) emptyResponse
-
--- parseErr :: 
--- parseErr = loop where
---   loop = do
---     errtype <- get
---     if (errtype == (0 :: Word8))
---        then return []
---        else let x = (errtype)
---             in do xs <- loop
---                   return (x : xs)
 
 -- | CommandComplete returns a ‘tag’ which indicates how many rows were
 -- affected, or returned, as a result of the command.
@@ -433,7 +445,8 @@ types = [('C',CommandComplete)
         ,('Z',ReadyForQuery)
         ,('N',NoticeResponse)
         ,('R',AuthenticationOk)
-        ,('Q',Query)]
+        ,('Q',Query)
+        ,('p',PasswordMessage)]
 
 -- | Blocks until receives ReadyForQuery.
 waitForReady :: Handle -> IO ()
@@ -441,6 +454,7 @@ waitForReady h = loop where
   loop = do
   (typ,block) <- getMessage h
   case typ of
+    ErrorResponse -> E.throw $ GeneralError $ show block
     ReadyForQuery | decode block == 'I' -> return ()
     _                                   -> loop
 

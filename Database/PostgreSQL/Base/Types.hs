@@ -32,6 +32,8 @@ data ConnectionError =
   | AuthenticationFailed String -- ^ Connecting failed due to authentication problem.
   | InitializationError String  -- ^ Initialization (e.g. getting data types) failed.
   | ConnectionLost              -- ^ Connection was lost when using withConnection.
+  | UnsupportedAuthenticationMethod Int32 String -- ^ Unsupported method of authentication (e.g. md5).
+  | GeneralError String
   deriving (Typeable,Show)
 
 instance Exception ConnectionError where
@@ -73,6 +75,7 @@ data MessageType =
   | NoticeResponse
   | AuthenticationOk
   | Query
+  | PasswordMessage
   | UnknownMessageType
     deriving (Show,Eq)
 
