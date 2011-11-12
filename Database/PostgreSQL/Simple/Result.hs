@@ -232,7 +232,7 @@ conversionFailed :: Field -> String -> String -> a
 conversionFailed f s = throw . ConversionFailed (show (fieldType f)) s
 
 atto :: (Typeable a) => Compat -> Parser a -> Field -> Maybe ByteString -> a
-atto types p0 f = doConvert f types $ go undefined p0
+atto types p0 f = doConvert f types $ go (error "atto") p0
   where
     go :: (Typeable a) => a -> Parser a -> ByteString -> a
     go dummy p s =

@@ -1,3 +1,4 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE BangPatterns, DeriveDataTypeable, OverloadedStrings, DisambiguateRecordFields #-}
 
 -- |
@@ -50,6 +51,7 @@ module Database.PostgreSQL.Simple
     , In(..)
     , Binary(..)
     , Only(..)
+    , ProcessedQuery
     , Pool
     -- ** Exceptions
     , FormatError(fmtMessage, fmtQuery, fmtParams)
@@ -62,6 +64,8 @@ module Database.PostgreSQL.Simple
     -- * Queries that return results
     , query
     , query_
+    , processQuery
+    , queryProcessed
     -- * Queries that stream results
     -- , fold
     -- , fold_
@@ -98,6 +102,7 @@ import Database.PostgreSQL.Simple.Types (Binary(..), In(..), Only(..), Query(..)
 import Text.Regex.PCRE.Light (compile, caseless, match)
 import qualified Data.ByteString.Char8 as B
 import qualified Database.PostgreSQL.Base as Base
+import Data.Monoid
 
 -- | Exception thrown if a 'Query' could not be formatted correctly.
 -- This may occur if the number of \'@?@\' characters in the query
@@ -229,6 +234,21 @@ query conn template qs = do
 -- | A version of 'query' that does not perform query substitution.
 query_ :: (QueryResults r) => Connection -> Query -> IO [r]
 query_ conn (Query q) = do
+  (fields,rows) <- Base.query conn q
+  forM rows $ \row -> let !c = convertResults fields row
+                      in return c
+
+-- | A processed, appendable. query
+newtype ProcessedQuery r = ProcessedQuery ByteString
+  deriving (Monoid,Show)
+
+-- | Process a query for later use.
+processQuery :: (QueryParams q,QueryResults r) => Query -> q -> IO (ProcessedQuery r)
+processQuery template qs = fmap ProcessedQuery $ formatQuery template qs
+
+-- | A version of 'query' that does not perform query substitution.
+queryProcessed :: (QueryResults r) => Connection -> ProcessedQuery r -> IO [r]
+queryProcessed conn (ProcessedQuery q) = do
   (fields,rows) <- Base.query conn q
   forM rows $ \row -> let !c = convertResults fields row
                       in return c
