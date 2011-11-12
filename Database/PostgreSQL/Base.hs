@@ -16,7 +16,10 @@ module Database.PostgreSQL.Base
   ,defaultConnectInfo
   ,close
   ,withDB
-  ,withTransaction)
+  ,withTransaction
+  ,newPool
+  ,pconnect
+  ,withPoolConnection)
   where
 
 import           Database.PostgreSQL.Base.Types
@@ -74,6 +77,49 @@ defaultConnectInfo = ConnectInfo {
                      , connectPassword = ""
                      , connectDatabase = ""
                      }
+
+-- | Create a new connection pool.
+newPool :: MonadIO m
+        => ConnectInfo -- ^ Connect info.
+        -> m Pool
+newPool info = liftIO $ do
+  var <- newMVar $ PoolState {
+    poolConnections = []
+  , poolConnectInfo = info
+  }
+  return $ Pool var
+
+-- | Connect using the connection pool.
+pconnect :: MonadIO m => Pool -> m Connection
+pconnect (Pool var) = liftIO $ do
+  modifyMVar var $ \state@PoolState{..} -> do
+    case poolConnections of
+      []           -> do conn <- connect poolConnectInfo
+                         return (state,conn)
+      (conn:conns) -> return (state { poolConnections = conns },conn)
+
+-- | Restore a connection to the pool.
+restore :: MonadIO m => Pool -> Connection -> m ()
+restore (Pool var) conn = liftIO $ do
+  handle <- readMVar $ connectionHandle conn
+  modifyMVar_ var $ \state -> do
+    case handle of
+      Nothing -> return state
+      Just h -> do
+        eof <- hIsOpen h
+        if eof
+           then return state { poolConnections = conn : poolConnections state }
+           else return state
+
+-- | Use the connection pool.
+withPoolConnection
+  :: (MonadCatchIO m,MonadIO m)
+  => Pool                 -- ^ The connection pool.
+  -> (Connection -> m a) -- ^ Use the connection.
+  -> m ()
+withPoolConnection pool m = do
+  _ <- E.bracket (pconnect pool) (restore pool) m
+  return ()
 
 -- | Connect with the given username to the given database. Will throw
 --   an exception if it cannot connect.
