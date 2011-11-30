@@ -82,6 +82,8 @@ module Database.PostgreSQL.Simple
     -- * Helper functions
     , formatMany
     , formatQuery
+    , withPoolConnection
+    , newPool
     ) where
 
 import Blaze.ByteString.Builder (Builder, fromByteString, toByteString)
@@ -94,6 +96,7 @@ import Data.List (intersperse)
 import Data.Monoid (mappend, mconcat)
 import Data.Typeable (Typeable)
 import Database.PostgreSQL.Base.Types (ConnectInfo(..),Connection(..),Pool)
+import Database.PostgreSQL.Base (withPoolConnection, newPool)
 import Database.PostgreSQL.Simple.Param (Action(..), inQuotes)
 import Database.PostgreSQL.Simple.QueryParams (QueryParams(..))
 import Database.PostgreSQL.Simple.QueryResults (QueryResults(..))
