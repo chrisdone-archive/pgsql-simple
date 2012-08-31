@@ -10,7 +10,7 @@ module Database.PostgreSQL.Base.Types
   ,Size(..)
   ,FormatCode(..)
   ,Modifier(..)
-  ,ObjectId(..)
+  ,ObjectId
   ,Pool(..)
   ,PoolState(..)
   ,ConnectionError(..))
@@ -23,7 +23,7 @@ import Data.Int
 import Data.Typeable
 import Data.Word
 import System.IO (Handle)
-import Data.Map (Map)
+import Data.IntMap.Strict (IntMap)
 import Control.Exception (Exception)
 
 data ConnectionError =
@@ -50,7 +50,7 @@ data ConnectInfo = ConnectInfo {
 -- | A database connection.
 data Connection = Connection {
       connectionHandle  :: MVar (Maybe Handle)
-    , connectionObjects :: MVar (Map ObjectId String)
+    , connectionObjects :: MVar (IntMap Type)
     }
 
 -- | Result of a database query.
@@ -124,8 +124,7 @@ data FormatCode = TextCode | BinaryCode
 data Modifier = Modifier
 
 -- | A PostgreSQL object ID.
-newtype ObjectId = ObjectId Int32
-  deriving (Eq,Ord,Show)
+type ObjectId = Int
 
 -- | A connection pool.
 data PoolState = PoolState {

@@ -41,8 +41,8 @@ import qualified Data.ByteString.Lazy.UTF8      as L (toString,fromString)
 import           Data.ByteString.UTF8           (toString,fromString)
 import           Data.Int
 import           Data.List
-import           Data.Map                       (Map)
-import qualified Data.Map                       as M
+import           Data.IntMap.Strict             (IntMap)
+import qualified Data.IntMap.Strict             as IntMap
 import           Data.Maybe
 import           Data.Monoid
 import           Network
@@ -129,7 +129,7 @@ connect connectInfo@ConnectInfo{..} = liftIO $ withSocketsDo $ do
   h <- connectTo connectHost (PortNumber $ fromIntegral connectPort)
   hSetBuffering h NoBuffering
   putMVar var $ Just h
-  types <- newMVar M.empty
+  types <- newMVar IntMap.empty
   let conn = Connection var types
   authenticate conn connectInfo
   return conn
@@ -288,15 +288,17 @@ sendPassClearText h conninfo@ConnectInfo{..} = do
 --------------------------------------------------------------------------------
 -- Initialization
 
-objectIds :: Handle -> IO (Map ObjectId String)
+objectIds :: Handle -> IO (IntMap Type)
 objectIds h = do
-    Result{..} <- sendQuery M.empty h q
+    Result{..} <- sendQuery IntMap.empty h q
     case resultType of
       ErrorResponse -> E.throw $ InitializationError "Couldn't get types."
-      _ -> return $ M.fromList $ catMaybes $ flip map resultRows $ \row ->
+      _ -> return $ IntMap.fromList $ catMaybes $ flip map resultRows $ \row ->
              case map toString $ catMaybes row of
-               [typ,readMay -> Just objId] -> Just $ (ObjectId objId,typ)
-               _                           -> Nothing
+               [typeName,readMay -> Just objId] -> do
+                 typ <- typeFromName typeName
+	         return (fromIntegral objId,typ)
+               _ -> Nothing
 
   where q = fromString ("SELECT typname, oid FROM pg_type" :: String)
 
@@ -304,7 +306,7 @@ objectIds h = do
 -- Queries and commands
 
 -- | Send a simple query.
-sendQuery :: Map ObjectId String -> Handle -> ByteString -> IO Result
+sendQuery :: IntMap Type -> Handle -> ByteString -> IO Result
 sendQuery types h sql = do
   sendMessage h Query $ string sql
   listener $ \continue -> do
@@ -346,7 +348,7 @@ setCommandTag block = do
           cmds = ["DELETE","UPDATE","SELECT","MOVE","FETCH"]
 
 -- | Update the row description of the result.
-getRowDesc :: MonadState Result m => Map ObjectId String -> L.ByteString -> m ()
+getRowDesc :: MonadState Result m => IntMap Type -> L.ByteString -> m ()
 getRowDesc types block =
   modify $ \r -> r {
     resultDesc = Just (parseFields types (runGet parseMsg block))
@@ -388,18 +390,18 @@ getRowDesc types block =
 -- statement variant of Describe, the format code is not yet known and
 -- will always be zero.
 --
-parseFields :: Map ObjectId String
+parseFields :: IntMap Type
             -> [(L.ByteString,Int32,Int16,Int32,Int16,Int32,Int16)]
             -> [Field]
-parseFields types = map parse where
+parseFields types = mapMaybe parse where
   parse (_fieldName
         ,_ -- parseObjId        -> _objectId
         ,_ -- parseAttrId       -> _attrId
-        ,parseType types   -> typ
+        ,parseType types        -> typ
         ,_ -- parseSize         -> _typeSize
         ,_ -- parseModifier typ -> _typeModifier
         ,parseFormatCode   -> formatCode)
-    = Field {
+    = Just $ Field {
       fieldType = typ
     , fieldFormatCode = formatCode
     }
@@ -417,13 +419,11 @@ parseFields types = map parse where
 -- parseAttrId n = Just (ObjectId $ fromIntegral n)
 
 -- | Parse a number into a type.
-parseType :: Map ObjectId String -> Int32 -> Type
+parseType :: IntMap Type -> Int32 -> Type
 parseType types objId =
-  case M.lookup (ObjectId objId) types of
-    Just name -> case typeFromName name of
-                   Just typ -> typ
-                   Nothing -> error $ "parseType: Unknown type: " ++ show name
-    _ -> error $ "parseType: Unable to parse type: " ++ show objId
+  case IntMap.lookup (fromIntegral objId) types of
+    Just typ -> typ
+    _ -> error $ "parseType: Unknown type given by object-id: " ++ show objId
 
 typeFromName :: String -> Maybe Type
 typeFromName = flip lookup fieldTypes
