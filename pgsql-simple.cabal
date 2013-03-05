@@ -1,9 +1,9 @@
 name:           pgsql-simple
-version:        0.1.1
+version:        0.1.2
 homepage:       https://github.com/chrisdone/pgsql-simple
 bug-reports:    https://github.com/chrisdone/pgsql-simple/issues
 synopsis:       A mid-level PostgreSQL client library.
-description:    
+description:
     A mid-level client library for the PostgreSQL database, intended to be
     fast and easy to use.
 license:        BSD3
@@ -40,7 +40,7 @@ library
     text >= 0.11.0.2,
     time,
     network >= 2.2,
-    binary >= 0.5,
+    binary >= 0.4.1 && < 0.6,
     mtl >= 2.0,
     MonadCatchIO-transformers,
     utf8-string,
